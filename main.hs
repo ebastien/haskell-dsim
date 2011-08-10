@@ -26,9 +26,18 @@ type TravelSolutionsList = [TravelSolution]
 type Fare = Double
 
 type Availability = Double
- 
-generateBookingRequest :: (RandomGen g) => g -> (g, BookingRequest)
-generateBookingRequest g = (g, BookingRequest)
+
+data Event = BookingRequestEvent BookingRequest
+
+type Demand = [Event]
+
+data Snapshot = VoidSnapshot
+
+generateEvent :: (RandomGen gen) => gen -> (Event, gen)
+generateEvent gen = (BookingRequestEvent BookingRequest, gen)
+
+generateDemand :: (RandomGen gen) => gen -> Demand
+generateDemand gen0 = let (e, gen1) = generateEvent gen0 in e:generateDemand gen1
 
 simulateBookingRequest :: BookingRequest -> TravelSolution
 simulateBookingRequest br = TravelSolution
@@ -36,14 +45,13 @@ simulateBookingRequest br = TravelSolution
 findTravelSolutions :: BookingRequest -> TravelSolutionsList
 findTravelSolutions br = []
 
-getNextBookingRequest :: IO BookingRequest
-getNextBookingRequest = do
-  gen <- getStdGen
-  let (newgen, br) = generateBookingRequest gen
-  setStdGen newgen
-  return br
+runEvent :: Event -> Snapshot -> Snapshot
+runEvent e s = s
+
+runSimulation :: Demand -> Snapshot -> Snapshot
+runSimulation d s0 = foldr runEvent s0 d
 
 main = do
-  br <- getNextBookingRequest
-  let ts = simulateBookingRequest br
-  return ()
+  gen <- getStdGen
+  let demand = take 10 $ generateDemand gen
+  return $ runSimulation demand VoidSnapshot
