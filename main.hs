@@ -49,20 +49,22 @@ data Snapshot = Snapshot { snapTime :: UTCTime
 
 type Simulation = [Snapshot]
 
-data BreakPoint = NeverBreak | TimeBreak { breakTime :: UTCTime } deriving (Show)
+data BreakPoint = TimeBreak { breakTime :: UTCTime } deriving (Show)
 
 -- | Generate a single event
 
-generateEvent :: (RandomGen gen) => gen -> Event -> (Event, gen)
-generateEvent gen0 evt0 = (Event newTime newType, gen0)
-                        where
-                          newTime = addUTCTime (fromInteger 10) (eventTime evt0)
-                          newType = BookingEvent BookingRequest
+generateEvent :: (RandomGen gen) => gen -> UTCTime -> (Event, gen)
+generateEvent gen0 t0 = (Event t1 be, gen0)
+                      where
+                        t1 = (fromInteger 10) `addUTCTime` t0
+                        be = BookingEvent BookingRequest
 
 -- | Generate the demand (i.e an infinite sequence of events)
 
-generateDemand :: (RandomGen gen) => gen -> Event -> Demand
-generateDemand gen0 evt0 = let (evt1, gen1) = generateEvent gen0 evt0 in evt1:generateDemand gen1 evt1
+generateDemand :: (RandomGen gen) => gen -> UTCTime -> Demand
+generateDemand gen0 t0 = e1 : generateDemand gen1 (eventTime e1)
+                       where
+                         (e1, gen1) = generateEvent gen0 t0
 
 -- | Apply a single event on a simulation snapshot
 
@@ -71,9 +73,8 @@ applyEvent (Snapshot tp c) (Event te _) = Snapshot te (c+1)
 
 -- | Test whether a breakpoint has been reached
 
-breakReached :: BreakPoint -> Snapshot -> Bool
-breakReached NeverBreak    _ = False
-breakReached (TimeBreak t) p = t <= (snapTime p)
+bkptReached :: BreakPoint -> Snapshot -> Bool
+bkptReached (TimeBreak t) p = t <= (snapTime p)
 
 -- | Simulate a demand starting from an initial snapshot
 
@@ -83,13 +84,13 @@ runSimulation p0 d = scanl applyEvent p0 d
 -- | Run a simulation until the breakpoint is reached
 
 runUntil :: BreakPoint -> Snapshot -> Demand -> Simulation
-runUntil b p0 d = takeWhile (not . breakReached b) $ runSimulation p0 d
+runUntil b p0 d = takeWhile (not . bkptReached b) $ runSimulation p0 d
 
 --
 
-tzero = UTCTime (fromGregorian 2000 01 01) (timeOfDayToTime (TimeOfDay 00 00 00))
-tdone = UTCTime (fromGregorian 2000 01 01) (timeOfDayToTime (TimeOfDay 00 01 00))
-snap = Snapshot tzero 0
-bkpt = TimeBreak tdone
-demand = generateDemand (mkStdGen 123) (Event tzero VoidEvent)
-result = runUntil bkpt snap demand
+t_zero = UTCTime (fromGregorian 2000 01 01) (timeOfDayToTime (TimeOfDay 00 00 00))
+t_done = UTCTime (fromGregorian 2000 01 01) (timeOfDayToTime (TimeOfDay 00 01 00))
+s_zero = Snapshot t_zero 0
+b_done = TimeBreak t_done
+demand = generateDemand (mkStdGen 123) t_zero
+result = runUntil b_done s_zero demand
