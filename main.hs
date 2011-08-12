@@ -78,9 +78,7 @@ breakReached (TimeBreak t) p = t <= (snapTime p)
 -- | Simulate a demand starting from an initial snapshot
 
 runSimulation :: Snapshot -> Demand -> Simulation
-runSimulation p0 d = foldr step [p0] d
-                   where
-                     step e s = (applyEvent (head s) e):s
+runSimulation p0 d = scanl applyEvent p0 d
 
 -- | Run a simulation until the breakpoint is reached
 
