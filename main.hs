@@ -81,16 +81,28 @@ bkptReached (TimeBreak t) p = t <= (snapTime p)
 runSimulation :: Snapshot -> Demand -> Simulation
 runSimulation p0 d = scanl applyEvent p0 d
 
--- | Run a simulation until the breakpoint is reached
+-- | Keep simulation results until a breakpoint is reached
 
-runUntil :: BreakPoint -> Snapshot -> Demand -> Simulation
-runUntil b p0 d = takeWhile (not . bkptReached b) $ runSimulation p0 d
+keepUntil :: BreakPoint -> Simulation -> Simulation
+keepUntil b = takeWhile (not . bkptReached b)
 
---
+-- | Keep simulation results between two breakpoints
 
+keepBetween :: BreakPoint -> BreakPoint -> Simulation -> Simulation
+keepBetween b1 b2 = dropWhile (not . bkptReached b1) . keepUntil b2
+
+-- The starting time of the simulation
 t_zero = UTCTime (fromGregorian 2000 01 01) (timeOfDayToTime (TimeOfDay 00 00 00))
-t_done = UTCTime (fromGregorian 2000 01 01) (timeOfDayToTime (TimeOfDay 00 01 00))
+
+-- The initial state of the simulation
 s_zero = Snapshot t_zero 0
-b_done = TimeBreak t_done
+
 demand = generateDemand (mkStdGen 123) t_zero
-result = runUntil b_done s_zero demand
+
+b1 = TimeBreak $ UTCTime (fromGregorian 2000 03 01) (timeOfDayToTime (TimeOfDay 00 10 00))
+b2 = TimeBreak $ UTCTime (fromGregorian 2000 03 01) (timeOfDayToTime (TimeOfDay 00 11 00))
+
+result = keepBetween b1 b2 $ runSimulation s_zero demand
+
+main = do
+  putStrLn $ show result
