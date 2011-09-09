@@ -1,6 +1,16 @@
 import Data.Ratio
 import Data.List
-import Random
+import Data.Array.IArray
+import Data.Tuple
+
+import Data.Random.Source.PureMT (pureMT)
+import Data.Random.Source.Std
+import Data.Random.Distribution.Uniform (uniform)
+import Data.Random.Distribution.Categorical (categorical)
+import Data.Random.RVar (RVar, runRVar)
+import Control.Monad.State.Lazy (evalState)
+import Control.Monad (replicateM)
+
 
 -- Discrete probability mass distribution
 data DisM a b = DisM (a, a) [(a, b)] deriving Show
@@ -14,11 +24,6 @@ ldistrib :: (Integral a, RealFrac b, Integral c) => DisM a b -> c -> [(a, c)]
 ldistrib (DisM _ values) n = snd $ mapAccumL step (n, 0) values
     where step (m, c) (i, p) = ((m - k, c + p), (i, k))
               where k = floor (p * (fromIntegral m) / (1 - c))
-
--- TODO: Randomized distribution of events according to a probability mass function
--- Slower than the approximate alternative but fair when the number of events is small
-rdistrib :: (RandomGen g, Integral a, RealFrac b, Integral c) => g -> DisM a b -> c -> [(a, c)]
-rdistrib gen (DisM _ values) n = []
 
 -- Interpolate a discrete cummulative distribution
 intercdf :: (Integral a, Fractional b) => DisC a b -> DisC a b
@@ -34,8 +39,33 @@ derivcdf (DisC bounds values) = DisM bounds ((head values):(derive values))
     where derive (_:[]) = []
           derive ((i, pi):y@(j, pj):xs) = (j, (pj - pi)):(derive (y:xs))
 
-partial_cdf = DisC (-330, -1) [(-330, 0), (-40, 0.2), (-20, 0.6), (-1, 1.0)]
+--
+
+partial_cdf = DisC (-330, -1) [(-330, 0), (-40, 0.2), (-20, 0.6), (-1, 1.0)] :: DisC Int Double
 
 cdf = intercdf partial_cdf
 pmf = derivcdf cdf
-dis = ldistrib pmf 10000
+ldis = ldistrib pmf 10000
+
+-- Work in progress:
+-- Randomized distribution of events according to a probability mass function
+
+pmf2cat (DisM _ values) = categorical (uncurry zip (swap . unzip $ values))
+
+-- a categorical random variable
+c = pmf2cat pmf
+
+-- a random variable for 10K categorical draws
+v = replicateM 10000 c
+
+-- the random action
+a = runRVar v StdRandom
+
+-- the evaluation of the action from the given intial state
+x = evalState a (pureMT 0)
+
+hist :: (Ix a, Num b) => (a, a) -> [a] -> Array a b
+hist bnds is = accumArray (+) 0 bnds [(i, 1) | i <- is]
+
+-- the histogram
+h = hist (-330, -1) x
