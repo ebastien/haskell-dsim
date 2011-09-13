@@ -3,6 +3,8 @@ import Data.List
 import Data.Array.IArray
 import Data.Tuple
 
+import Data.Time.Calendar
+
 import Data.Random.Source.PureMT (pureMT)
 import Data.Random.Source.Std
 import Data.Random.Distribution.Uniform (uniform)
@@ -50,6 +52,7 @@ ldis = ldistrib pmf 10000
 -- Work in progress:
 -- Randomized distribution of events according to a probability mass function
 
+-- Convert a discrete probability mass distribution to a categorical random variable
 pmf2cat (DisM _ values) = categorical (uncurry zip (swap . unzip $ values))
 
 -- a categorical random variable
@@ -69,3 +72,13 @@ hist bnds is = accumArray (+) 0 bnds [(i, 1) | i <- is]
 
 -- the histogram
 h = hist (-330, -1) x
+
+--
+
+d0 = fromGregorian 2010 01 01
+d1 = fromGregorian 2010 12 31
+ds = [d0..d1]
+
+trip_pmf = let pi = 1.0 / (fromIntegral (length ds)) in DisM (d0, d1) [ (di, pi) | di <- ds ]
+
+
