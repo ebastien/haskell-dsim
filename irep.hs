@@ -2,6 +2,7 @@ import Data.Ratio
 import Data.List
 import Data.Array.IArray
 import Data.Tuple
+import qualified Data.Vector as V
 
 import Data.Time.Calendar
 
@@ -81,4 +82,11 @@ ds = [d0..d1]
 
 trip_pmf = let pi = 1.0 / (fromIntegral (length ds)) in DisM (d0, d1) [ (di, pi) | di <- ds ]
 
+-- convolution of two vectors
+vconv :: (Num a) => V.Vector a -> V.Vector a -> V.Vector a
+vconv a b = V.generate (V.length b) step
+    where step i = V.sum $ V.zipWith (*) (V.reverse a) (V.drop i b)
 
+va = V.fromList [1,2,3]
+vb = V.fromList [0..20]
+vc = vconv va vb
