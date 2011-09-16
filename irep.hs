@@ -1,14 +1,14 @@
-import Data.Ratio
-import Data.List
-import Data.Array.IArray
-import Data.Tuple
+{-# LANGUAGE FlexibleContexts #-}
+
 import qualified Data.Vector as V
+
+import Data.List (mapAccumL)
 import Data.Maybe (fromMaybe)
-import Data.Time.Calendar
 
 import Data.Random.Source.PureMT (pureMT)
-import Data.Random.Source.Std
-import Data.Random.Distribution.Uniform (uniform)
+import Data.Random.Source.Std (StdRandom(StdRandom))
+import Data.Random.Distribution (Distribution)
+import Data.Random.Distribution.Uniform (Uniform, uniform)
 import Data.Random.Distribution.Categorical (categorical)
 import Data.Random.RVar (RVar, runRVar)
 import Control.Monad.State.Lazy (evalState)
@@ -50,16 +50,20 @@ data OffsetArray a = OffsetArray { firstIndex :: Int, arrayValues :: V.Vector a 
 lastIndex :: OffsetArray a -> Int
 lastIndex (OffsetArray o v) = o + (V.length v) - 1
 
+-- Bounds of an array with offset
+indexBounds :: OffsetArray a -> (Int, Int)
+indexBounds a = (firstIndex a, lastIndex a)
+
 -- Safe lookup with default value
 safeAt :: a -> OffsetArray a -> Int -> a
 safeAt q a n = fromMaybe q ((arrayValues a) V.!? (n - (firstIndex a)))
 
--- Conversion from discrete range
+-- Conversion from discrete range to array with offset
 fromDiscreteRange :: (Num b) => DiscreteRange b -> OffsetArray b
 fromDiscreteRange (DiscreteRange (m, n) values) = OffsetArray m (V.accum (+) vzero translated)
-  where length = n - m + 1
-        vzero = V.replicate length 0
-        translated = map (\(i, x) -> (i - m, x)) values
+    where length = n - m + 1
+          vzero = V.replicate length 0
+          translated = map (\(i, x) -> (i - m, x)) values
 
 -- Convolution of two arrays
 aconv :: (Num a) => OffsetArray a -> OffsetArray a -> OffsetArray a
@@ -72,37 +76,48 @@ aconv a b = OffsetArray first (V.generate length step)
                     kmin = max fa (n - lb)
                     kmax = min la (n - fb)
 
---
-
-partial_cdf = DiscreteRange (-330, -1) [(-330, 0), (-40, 0.2), (-20, 0.6), (-1, 1.0)] :: DiscreteRange Double
-
-cdf = intercdf partial_cdf
-pmf = derivcdf cdf
-ldis = ldistrib pmf 10000
-
--- Work in progress:
--- Randomized distribution of events according to a probability mass function
+-- Histogram of a steam of categorical events identified by Int values
+histogram :: (Int, Int) -> [Int] -> OffsetArray Int
+histogram (m, n) events = OffsetArray m (V.accum (+) vzero indices)
+    where length = n - m + 1
+          vzero = V.replicate length 0
+          indices = map (\i -> (i-m, 1)) events
 
 -- Convert a discrete probability mass distribution to a categorical random variable
-pmf2cat (DiscreteRange _ values) = categorical (uncurry zip (swap . unzip $ values))
+fromOffsetArray :: (Distribution Uniform a,
+                    Ord a, Fractional a) => OffsetArray a -> RVar Int
+fromOffsetArray a = categorical $ V.ifoldl step [] (arrayValues a)
+    where offset = firstIndex a
+          step xs i value = (value, i + offset):xs
+
+-- Example
+
+-- Partial advance purchase cummulative distribution
+advp_partial = DiscreteRange (-330, -1) [(-330, 0), (-40, 0.2), (-20, 0.6), (-1, 1.0)] :: DiscreteRange Double
+
+-- Interpolated advance purchase cummulative distribution
+advp_cdf = intercdf advp_partial
+
+-- Distribution of advance purchase probabilities
+advp_pmf = fromDiscreteRange $ derivcdf advp_cdf
+
+-- Uniform distribution of trip probabilities over a range of days
+trip_pmf = fromDiscreteRange $ uniformpmf 0 364
+
+-- Distribution of booking probabilities
+bkng_pmf = aconv trip_pmf advp_pmf
 
 -- a categorical random variable
-c = pmf2cat pmf
+bkng_rvar = fromOffsetArray bkng_pmf
 
--- a random variable for 10K categorical draws
-v = replicateM 10000 c
+-- a random variable for 10K bookings
+all_bkng_rvar = replicateM 10000 bkng_rvar
 
 -- the random action
-a = runRVar v StdRandom
+all_bkng_act = runRVar all_bkng_rvar StdRandom
 
 -- the evaluation of the action from the given intial state
-x = evalState a (pureMT 0)
+all_bkng_draw = evalState all_bkng_act (pureMT 0)
 
-hist :: (Ix a, Num b) => (a, a) -> [a] -> Array a b
-hist bnds is = accumArray (+) 0 bnds [(i, 1) | i <- is]
-
--- the histogram
-h = hist (-330, -1) x
-
---
-
+-- the counters of bookings over a range of days
+bkng_hist = histogram (indexBounds bkng_pmf) all_bkng_draw
