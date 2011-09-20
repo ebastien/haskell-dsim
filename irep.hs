@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, PackageImports #-}
 
 import qualified Data.Vector as V
 
@@ -7,12 +7,16 @@ import Data.Maybe (fromMaybe)
 
 import Data.Random.Source.PureMT (pureMT)
 import Data.Random.Source.Std (StdRandom(StdRandom))
-import Data.Random.Distribution (Distribution)
+import Data.Random.Distribution (Distribution, rvar)
 import Data.Random.Distribution.Uniform (Uniform, uniform)
-import Data.Random.Distribution.Categorical (categorical)
+import Data.Random.Distribution.Categorical (fromWeightedList)
 import Data.Random.RVar (RVar, runRVar)
 import Control.Monad.State.Lazy (evalState)
 import Control.Monad (replicateM)
+
+import "data-accessor" Data.Accessor
+import Graphics.Rendering.Chart
+import Graphics.Rendering.Chart.Gtk
 
 -- A discrete range of indexed values
 data DiscreteRange a = DiscreteRange (Int, Int) [(Int, a)] deriving Show
@@ -76,6 +80,14 @@ aconv a b = OffsetArray first (V.generate length step)
                     kmin = max fa (n - lb)
                     kmax = min la (n - fb)
 
+-- Crop an array
+crop :: (Int, Int) -> OffsetArray a -> OffsetArray a
+crop (m, n) a = OffsetArray m' (V.slice (m' - i) (n' - m') (arrayValues a))
+    where i = firstIndex a
+          j = lastIndex a
+          m' = min (max m i) j
+          n' = min (max n i) j
+
 -- Histogram of a steam of categorical events identified by Int values
 histogram :: (Int, Int) -> [Int] -> OffsetArray Int
 histogram (m, n) events = OffsetArray m (V.accum (+) vzero indices)
@@ -84,9 +96,10 @@ histogram (m, n) events = OffsetArray m (V.accum (+) vzero indices)
           indices = map (\i -> (i-m, 1)) events
 
 -- Convert a discrete probability mass distribution to a categorical random variable
+-- The random variable is normalized even if the probabilities do not sum up to 1
 fromOffsetArray :: (Distribution Uniform a,
                     Ord a, Fractional a) => OffsetArray a -> RVar Int
-fromOffsetArray a = categorical $ V.ifoldl step [] (arrayValues a)
+fromOffsetArray a = rvar . fromWeightedList $ V.ifoldl step [] (arrayValues a)
     where offset = firstIndex a
           step xs i value = (value, i + offset):xs
 
@@ -101,11 +114,12 @@ advp_cdf = intercdf advp_partial
 -- Distribution of advance purchase probabilities
 advp_pmf = fromDiscreteRange $ derivcdf advp_cdf
 
--- Uniform distribution of trip probabilities over a range of days
-trip_pmf = fromDiscreteRange $ uniformpmf 0 364
+-- Uniform distribution of trip probabilities over a year
+trip_range = (0, 364)
+trip_pmf = fromDiscreteRange $ uncurry uniformpmf trip_range
 
 -- Distribution of booking probabilities
-bkng_pmf = aconv trip_pmf advp_pmf
+bkng_pmf = crop trip_range (aconv trip_pmf advp_pmf)
 
 -- a categorical random variable
 bkng_rvar = fromOffsetArray bkng_pmf
@@ -121,3 +135,19 @@ all_bkng_draw = evalState all_bkng_act (pureMT 0)
 
 -- the counters of bookings over a range of days
 bkng_hist = histogram (indexBounds bkng_pmf) all_bkng_draw
+
+-- Plotting
+bkng_chart_values = zip [firstIndex bkng_hist..] (map (:[]) $ V.toList $ arrayValues bkng_hist)
+
+bars = plot_bars_titles ^= ["booking requests"]
+     $ plot_bars_style ^= BarsClustered
+     $ plot_bars_values ^= bkng_chart_values
+     $ defaultPlotBars
+
+layout = layout1_title ^= "Daily booking requests"
+       $ layout1_plots ^= [ Left (plotBars bars) ]
+       $ defaultLayout1 :: Layout1 Int Int
+
+main = do
+    renderableToWindow (toRenderable layout) 800 600
+
