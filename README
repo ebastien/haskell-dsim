@@ -1,0 +1,7 @@
+Mac OS X Lion build depends:
+brew install haskell-platform --64bit
+brew install cairo --use-clang
+brew install gtk+
+cabal install gtk2hs-buildtools
+cabal install chart
+cabal install random-fu
