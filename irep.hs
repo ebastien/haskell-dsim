@@ -148,6 +148,9 @@ layout = layout1_title ^= "Daily booking requests"
        $ layout1_plots ^= [ Left (plotBars bars) ]
        $ defaultLayout1 :: Layout1 Int Int
 
+rendering = toRenderable layout
+
 main = do
-    renderableToWindow (toRenderable layout) 800 600
+      putStrLn $ show bkng_hist
+--    renderableToSVGFile rendering 800 600 "plot.svg"
 
