@@ -1,26 +1,22 @@
-import qualified Data.ByteString.Lazy.Char8 as C
-import Data.Binary.Get
+import Prelude hiding (take) -- conflicting with Attoparsec
+import Data.ByteString.Char8 (ByteString)
+import qualified Data.ByteString.Lazy.Char8 as LB (ByteString, getContents)
+import Data.Attoparsec.ByteString.Char8 (take, Parser)
+import Data.Attoparsec.ByteString.Lazy (maybeResult, parse, Result (Done))
 
 data LegElem = LegElem {
-  legAirline :: String
+  legAirline :: !ByteString
 } deriving Show
 
-decodeLeg :: Get LegElem
-decodeLeg = do
-  a <- getLazyByteString 2
-  return $ LegElem (C.unpack a)
+parseElem :: Parser LegElem
+parseElem = do
+  a <- take 2
+  return $ LegElem a
 
-type Block = C.ByteString
-type Element = C.ByteString
-
-decodeBlocks :: Get [Block]
-decodeBlocks = do
-  x <- getLazyByteString 1000
-  xs <- decodeBlocks
-  return (x:xs)
+go :: LB.ByteString -> Maybe LegElem
+go = maybeResult . (parse parseElem)
 
 main :: IO ()
 main = do
-  bin <- C.getContents
-  let blocks = takeWhile (not . C.null) $ runGet decodeBlocks bin
-  print blocks
+  c <- LB.getContents
+  print $ go c
