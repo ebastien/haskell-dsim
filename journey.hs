@@ -37,41 +37,59 @@ type Port = Int
 type Distance = Double
 type Coord = (Double, Double)
 
-data Move = Move Distance Coord
+data Move = Move Distance Coord deriving Show
 
-data OutboundPath = OutboundPath {
+data Outbound = Outbound {
   opVia :: Path,
   opOff :: Port,
   opMoves :: [Move]
-}
+} deriving Show
 
 type Path = [Port]
 
-type PortOutbounds = [(Port, [OutboundPath])]
+type PortsCoverage = [(Port, [Outbound])]
 
-type PortAdjacency = [(Port, [Port])]
-
-type PortGraph = (PortOutbounds, PortAdjacency)
+type PortsAdjacency = [(Port, [Port])]
 
 type OnDPaths = Array OnD [Path]
 
+port_bounds = (0,3)
 ond_bounds = ((0,0),(3,3))
 
-onds_direct :: PortOutbounds -> OnDPaths
-onds_direct outbounds = array ond_bounds assos
+onds_direct :: PortsCoverage -> OnDPaths
+onds_direct coverages = array ond_bounds assos
   where assos = do
-          (org, [outpath]) <- outbounds
-          let dst = opOff outpath
+          (org, outbounds) <- coverages
+          path <- outbounds
+          let dst = opOff path
           return ((org,dst), [[]]) -- a single direct (i.e empty stops list) path from org to dst
 
-p1 = 0
-p2 = 1
+onds_ext :: PortsCoverage -> PortsAdjacency -> Array Port [Outbound]
+onds_ext coverages adjacencies = accumArray (flip (:)) [] port_bounds $ join coverages adjacencies
+  where join cs@((p, c):cs') as@((p', a):as') | p == p' = (extend p c a) ++ (join cs' as')
+                                              | p < p' = join cs' as
+                                              | p > p' = join cs as'
+        join [] _ = []
+        join _ [] = []
+        extend stop coverage adjacency = do
+          org <- adjacency
+          Outbound via dst _ <- coverage
+          let outbound' = Outbound (stop:via) dst []
+          return (org, outbound')
+
+p0 = 0
+p1 = 1
+p2 = 2
 p3 = 3
 
 po = [
-     (p1, [ (OutboundPath [], p2, []) ]),
-     (p2, [ (OutboundPath [], p3, []) ]),
-     (p3, [ (OutboundPath [], p1, []) ])
+     (p0, [
+          (Outbound [] p1 []),
+          (Outbound [] p3 [])
+          ]),
+     (p1, [ (Outbound [] p2 []) ]),
+     (p2, [ (Outbound [] p0 []) ]),
+     (p3, [])
      ]
 
 -- 
