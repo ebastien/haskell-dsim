@@ -1,6 +1,7 @@
 
 import Data.Array.IArray
-import Data.Tuple
+import Data.Tuple (swap)
+import Control.Monad (guard)
 
 data FlightKey = FlightKey {
 }
@@ -48,34 +49,59 @@ data Outbound = Outbound {
 
 type Path = [Port]
 
+type PortBounds = (Port, Port)
+
 type PortsCoverage = Array Port [Outbound]
 
 type PortsAdjacency = Array Port [Port]
 
-port_bounds = (0,3)
+group_by_port :: PortBounds -> [(Port, a)] -> Array Port [a]
+group_by_port bnds = accumArray (flip (:)) [] bnds
 
-group_by_port :: [(Port, a)] -> Array Port [a]
-group_by_port = accumArray (flip (:)) [] port_bounds
+coordinates :: Port -> Coord
+coordinates _ = (0.0, 0.0)
+
+orthodromic_distance :: Coord -> Coord -> Distance
+orthodromic_distance _ _ = 1.0
+
+competitive_itinerary :: Coord -> Distance -> [Move] -> Bool
+competitive_itinerary coord0 dist0 moves = all competitive steps
+  where competitive (indirect, direct) = (indirect * ratio) < direct
+        ratio = 0.6
+        steps = scanl compose (dist0, dist0) moves
+        compose (indirect, _) (Move dist coord) = (indirect', direct)
+          where indirect' = indirect + dist
+                direct = orthodromic_distance coord0 coord
 
 -- Extend the coverage by one more stop
 extend_coverage :: PortsCoverage -> PortsAdjacency -> PortsCoverage
-extend_coverage cov adj | bounds cov == bounds adj = cov'
-  where cov' = group_by_port outbounds
+extend_coverage cov adj | bnds == bounds adj = cov'
+  where bnds = bounds cov
+        cov' = group_by_port bnds outbounds
         outbounds = concatMap extend $ zip (assocs cov) (assocs adj)
-        extend ((p,cs),(_p,as)) = do
-          org <- as
-          Outbound via dst _ <- cs
-          let outbound' = Outbound (p:via) dst []
-          return (org, outbound')
+        extend ((port,covs),(_,adjs)) = do
+          org <- adjs
+          Outbound stops dst moves <- covs
+          let coord_org = coordinates org
+              coord_port = coordinates port
+              distance = orthodromic_distance coord_org coord_port
+          guard $ competitive_itinerary coord_org distance moves
+          let stops' = port:stops
+              moves' = (Move distance coord_port):moves
+          return (org, Outbound stops' dst moves')
 
 -- Initial ports coverage from direct OnDs
-direct_coverage :: [OnD] -> PortsCoverage
-direct_coverage onds = group_by_port $ map outbound onds
-  where outbound (org,dst) = (org, Outbound [] dst [])
+direct_coverage :: PortBounds -> [OnD] -> PortsCoverage
+direct_coverage bnds onds = group_by_port bnds $ map outbound onds
+  where outbound (org,dst) = (org, Outbound [] dst [move])
+          where move = Move distance coord_dst
+                coord_dst = coordinates dst
+                coord_org = coordinates org
+                distance = orthodromic_distance coord_org coord_dst
 
 -- Ports adjacency from direct OnDs
-adjacency :: [OnD] -> PortsAdjacency
-adjacency onds = group_by_port $ map swap onds
+adjacency :: PortBounds -> [OnD] -> PortsAdjacency
+adjacency bnds onds = group_by_port bnds $ map swap onds
 
 p0 = 0
 p1 = 1
@@ -88,6 +114,8 @@ onds = [
        (p3, p0),
        (p3, p1)
        ] :: [OnD]
+
+bnds = (p0, p3)
 
 -- 
 
