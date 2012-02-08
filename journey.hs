@@ -1,5 +1,6 @@
 
 import Data.Array.IArray
+import Data.Tuple
 
 data FlightKey = FlightKey {
 }
@@ -47,50 +48,46 @@ data Outbound = Outbound {
 
 type Path = [Port]
 
-type PortsCoverage = [(Port, [Outbound])]
+type PortsCoverage = Array Port [Outbound]
 
-type PortsAdjacency = [(Port, [Port])]
-
-type OnDPaths = Array OnD [Path]
+type PortsAdjacency = Array Port [Port]
 
 port_bounds = (0,3)
-ond_bounds = ((0,0),(3,3))
 
-onds_direct :: PortsCoverage -> OnDPaths
-onds_direct coverages = array ond_bounds assos
-  where assos = do
-          (org, outbounds) <- coverages
-          path <- outbounds
-          let dst = opOff path
-          return ((org,dst), [[]]) -- a single direct (i.e empty stops list) path from org to dst
+group_by_port :: [(Port, a)] -> Array Port [a]
+group_by_port = accumArray (flip (:)) [] port_bounds
 
-onds_ext :: PortsCoverage -> PortsAdjacency -> Array Port [Outbound]
-onds_ext coverages adjacencies = accumArray (flip (:)) [] port_bounds $ join coverages adjacencies
-  where join cs@((p, c):cs') as@((p', a):as') | p == p' = (extend p c a) ++ (join cs' as')
-                                              | p < p' = join cs' as
-                                              | p > p' = join cs as'
-        join [] _ = []
-        join _ [] = []
-        extend stop coverage adjacency = do
-          org <- adjacency
-          Outbound via dst _ <- coverage
-          let outbound' = Outbound (stop:via) dst []
+-- Extend the coverage by one more stop
+extend_coverage :: PortsCoverage -> PortsAdjacency -> PortsCoverage
+extend_coverage cov adj | bounds cov == bounds adj = cov'
+  where cov' = group_by_port outbounds
+        outbounds = concatMap extend $ zip (assocs cov) (assocs adj)
+        extend ((p,cs),(_p,as)) = do
+          org <- as
+          Outbound via dst _ <- cs
+          let outbound' = Outbound (p:via) dst []
           return (org, outbound')
+
+-- Initial ports coverage from direct OnDs
+direct_coverage :: [OnD] -> PortsCoverage
+direct_coverage onds = group_by_port $ map outbound onds
+  where outbound (org,dst) = (org, Outbound [] dst [])
+
+-- Ports adjacency from direct OnDs
+adjacency :: [OnD] -> PortsAdjacency
+adjacency onds = group_by_port $ map swap onds
 
 p0 = 0
 p1 = 1
 p2 = 2
 p3 = 3
 
-po = [
-     (p0, [
-          (Outbound [] p1 []),
-          (Outbound [] p3 [])
-          ]),
-     (p1, [ (Outbound [] p2 []) ]),
-     (p2, [ (Outbound [] p0 []) ]),
-     (p3, [])
-     ]
+onds = [
+       (p0, p1),
+       (p2, p3),
+       (p3, p0),
+       (p3, p1)
+       ] :: [OnD]
 
 -- 
 
