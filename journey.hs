@@ -53,7 +53,7 @@ type PortBounds = (Port, Port)
 
 type PortsCoverage = Array Port [Outbound]
 
-type PortsAdjacency = Array Port [Port]
+type PortsAdjacency = Array Port [(Port, Coord, Coord, Distance)]
 
 group_by_port :: PortBounds -> [(Port, a)] -> Array Port [a]
 group_by_port bnds = accumArray (flip (:)) [] bnds
@@ -64,6 +64,7 @@ coordinates _ = (0.0, 0.0)
 orthodromic_distance :: Coord -> Coord -> Distance
 orthodromic_distance _ _ = 1.0
 
+-- Predicate for competitive itinerary according to direct vs. indirect distances
 competitive_itinerary :: Coord -> Distance -> [Move] -> Bool
 competitive_itinerary coord0 dist0 moves = all competitive steps
   where competitive (indirect, direct) = (indirect * ratio) < direct
@@ -80,28 +81,28 @@ extend_coverage cov adj | bnds == bounds adj = cov'
         cov' = group_by_port bnds outbounds
         outbounds = concatMap extend $ zip (assocs cov) (assocs adj)
         extend ((port,covs),(_,adjs)) = do
-          org <- adjs
+          (org, coord_org, coord_port, distance) <- adjs
           Outbound stops dst moves <- covs
-          let coord_org = coordinates org
-              coord_port = coordinates port
-              distance = orthodromic_distance coord_org coord_port
           guard $ competitive_itinerary coord_org distance moves
           let stops' = port:stops
               moves' = (Move distance coord_port):moves
           return (org, Outbound stops' dst moves')
 
--- Initial ports coverage from direct OnDs
-direct_coverage :: PortBounds -> [OnD] -> PortsCoverage
-direct_coverage bnds onds = group_by_port bnds $ map outbound onds
-  where outbound (org,dst) = (org, Outbound [] dst [move])
-          where move = Move distance coord_dst
-                coord_dst = coordinates dst
-                coord_org = coordinates org
-                distance = orthodromic_distance coord_org coord_dst
+-- Initial ports coverage from adjacency list
+initial_coverage :: PortsAdjacency -> PortsCoverage
+initial_coverage adj = group_by_port (bounds adj) $ concatMap adj_to_cov $ assocs adj
+  where adj_to_cov (dst, adjs) = do
+          (org, _, coord_dst, distance) <- adjs
+          let move = Move distance coord_dst
+          return (org, Outbound [] dst [move])
 
 -- Ports adjacency from direct OnDs
 adjacency :: PortBounds -> [OnD] -> PortsAdjacency
-adjacency bnds onds = group_by_port bnds $ map swap onds
+adjacency bnds onds = group_by_port bnds $ map make_edge onds
+  where make_edge (org, dst) = (dst, (org, coord_org, coord_dst, distance))
+          where distance = orthodromic_distance coord_org coord_dst
+                coord_org = coordinates org
+                coord_dst = coordinates dst
 
 p0 = 0
 p1 = 1
