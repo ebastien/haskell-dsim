@@ -37,17 +37,16 @@ type Port = Int
 -- 
 
 type Distance = Double
+
 type Coord = (Double, Double)
 
 data Move = Move Distance Coord deriving Show
 
-data Outbound = Outbound {
-  opVia :: Path,
-  opOff :: Port,
-  opMoves :: [Move]
-} deriving Show
-
 type Path = [Port]
+
+data Outbound = Outbound Path Port [Move] deriving Show
+
+data Inbound = Inbound Port Coord Move deriving Show
 
 type PortBounds = (Port, Port)
 
