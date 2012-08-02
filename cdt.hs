@@ -20,7 +20,7 @@ import qualified Data.ByteString as B
 
 import Data.Attoparsec.Types (Parser)
 import qualified Data.Attoparsec.ByteString.Char8 as P
-import Data.Attoparsec.Combinator (choice, many1)
+import Data.Attoparsec.Combinator (choice)
 import Data.Conduit.Attoparsec (conduitParser)
 
 import qualified Data.ByteString.Lazy as LB
@@ -28,6 +28,7 @@ import qualified Data.Attoparsec.ByteString.Lazy as LP
 
 import Data.Maybe (fromMaybe)
 import Data.Functor ((<$>))
+import Control.Applicative (some)
 
 count :: Monad m => Sink ByteString m Int
 count = CB.lines =$ CL.fold (\n _ -> n + 1 ) 0
@@ -74,7 +75,7 @@ resultConduit s = runResourceT $ sourceFile s $= conduitRecord $$ CL.take 10
 resultLazy :: FP.FilePath -> IO [Record]
 resultLazy s = do
   c <- LB.readFile $ FP.encodeString s
-  let r = LP.parse (many1 recordParser) c
+  let r = LP.parse (some recordParser) c
   return . take 10 . fromMaybe [] $ LP.maybeResult r
 
 main = defaultMain [
