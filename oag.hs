@@ -13,13 +13,17 @@ import qualified Data.Attoparsec.ByteString.Char8 as P
 import qualified Data.Attoparsec.ByteString.Lazy as LP
 
 import Data.Functor ((<$>))
-import Control.Applicative (some, many, (<*>), (<*))
+import Control.Applicative (some, many, (<*>), (<*), (<|>))
 
 import Data.Maybe (fromMaybe)
 
 import Data.Time.Calendar (Day, fromGregorianValid)
 
 import Data.List (elemIndex)
+
+import Data.Word (Word8)
+import Data.Bits (unsafeShiftL, (.|.), bit)
+import Data.Char (ord, chr)
 
 type Designator = ByteString
 type PeriodBoundary = Maybe Day
@@ -128,8 +132,31 @@ fnumP = decimalP 4
 -- | Parser for airline designators.
 airlineP = P.take 3
 
+type Dow = Word8
+
+-- | Read days of week from a ByteString
+toDow :: ByteString -> Maybe Dow
+toDow s | B8.length s == 7 = fst <$> B8.foldl step (Just (0, '1')) s
+        | otherwise        = Nothing
+  where step m c = m >>= step' c
+        step' c (a, n) | c == n    = Just (a' .|. 1, n')
+                       | c == ' '  = Just (a', n')
+                       | otherwise = Nothing
+          where a' = unsafeShiftL a 1
+                n' = succ n
+
+dowP' :: Parser Int
+dowP' = do
+  sum <$> (sequence $ step <$> ['1'..'7'])
+  where step n = oper <|> noop
+          where oper = do { P.satisfy (== n); return $ bit (ord n - ord '1') }
+                noop = do { P.char ' '; return 0 }
+
 -- | Parser for days of week.
-dowP = undefined
+dowP :: Parser Dow
+dowP = do
+  d <- toDow <$> P.take 7
+  fromMaybe (fail "Days of week parsing failed") $ return <$> d
 
 segmentP = P.char '4' >> P.take 199 >> (some P.endOfLine) >> return Segment
 
