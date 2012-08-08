@@ -85,8 +85,8 @@ legP = do
   avar <- P.anyChar
   P.take 6
   some P.endOfLine
-  let pnum = iviL + 100 * iviH in
-    return (Leg suffix airline fnum bdate edate)
+  let pnum = iviL + 100 * iviH
+  return (Leg suffix airline fnum bdate edate)
 
 -- | Parser for fixed length decimal numbers with space padding.
 decimalP :: Int -> Parser Int
@@ -104,10 +104,10 @@ dayP = decimalP 2
 -- | Parser for months.
 monthP :: Parser Int
 monthP = do
-  m <- (flip elemIndex) l <$> P.take 3
+  m <- (flip elemIndex) months <$> P.take 3
   fromMaybe (fail "Month parsing failed") $ return <$> m
-  where l = [ "XXX", "JAN","FEB", "MAR","APR", "MAY",
-              "JUN","JUL","AUG", "SEP", "OCT", "NOV", "DEC" ]
+  where months = [ "XXX", "JAN","FEB", "MAR","APR", "MAY",
+                   "JUN","JUL","AUG", "SEP", "OCT", "NOV", "DEC" ]
 
 -- | Parser for years.
 yearP :: Num a => Parser a
@@ -127,6 +127,9 @@ fnumP = decimalP 4
 
 -- | Parser for airline designators.
 airlineP = P.take 3
+
+-- | Parser for days of week.
+dowP = undefined
 
 segmentP = P.char '4' >> P.take 199 >> (some P.endOfLine) >> return Segment
 
