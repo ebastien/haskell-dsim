@@ -13,7 +13,7 @@ import qualified Data.Attoparsec.ByteString.Char8 as P
 import qualified Data.Attoparsec.ByteString.Lazy as LP
 
 import Data.Functor ((<$>))
-import Control.Applicative (some, many, (<*>), (<*), (<|>))
+import Control.Applicative (pure, some, many, (<*>), (<*), (*>), (<|>))
 
 import Data.Maybe (fromMaybe)
 
@@ -27,6 +27,8 @@ import Data.Char (ord, chr)
 
 type Designator = ByteString
 type PeriodBoundary = Maybe Day
+type Dow = Word8
+type Port = Int
 
 data Header = Header deriving Show
 
@@ -38,6 +40,7 @@ data Leg = Leg { lgSuffix :: Char
                , lgNumber :: Int
                , lgBegin :: PeriodBoundary
                , lgEnd :: PeriodBoundary
+               , lgDow :: Dow
                } deriving Show
 
 data Segment = Segment deriving Show
@@ -71,7 +74,7 @@ legP = do
   P.anyChar
   bdate <- periodBoundaryP  <?> "Leg period of operation (from)"
   edate <- periodBoundaryP  <?> "Leg period of operation (to)"
-  dow <- P.take 7
+  dow <- dowP               <?> "Leg days of week"
   P.anyChar
   bpoint <- P.take 3
   P.take 4
@@ -90,7 +93,7 @@ legP = do
   P.take 6
   some P.endOfLine
   let pnum = iviL + 100 * iviH
-  return (Leg suffix airline fnum bdate edate)
+  return (Leg suffix airline fnum bdate edate dow)
 
 -- | Parser for fixed length decimal numbers with space padding.
 decimalP :: Int -> Parser Int
@@ -132,31 +135,17 @@ fnumP = decimalP 4
 -- | Parser for airline designators.
 airlineP = P.take 3
 
-type Dow = Word8
-
--- | Read days of week from a ByteString
-toDow :: ByteString -> Maybe Dow
-toDow s | B8.length s == 7 = fst <$> B8.foldl step (Just (0, '1')) s
-        | otherwise        = Nothing
-  where step m c = m >>= step' c
-        step' c (a, n) | c == n    = Just (a' .|. 1, n')
-                       | c == ' '  = Just (a', n')
-                       | otherwise = Nothing
-          where a' = unsafeShiftL a 1
-                n' = succ n
-
-dowP' :: Parser Int
-dowP' = do
-  sum <$> (sequence $ step <$> ['1'..'7'])
-  where step n = oper <|> noop
-          where oper = do { P.satisfy (== n); return $ bit (ord n - ord '1') }
-                noop = do { P.char ' '; return 0 }
-
 -- | Parser for days of week.
 dowP :: Parser Dow
-dowP = do
-  d <- toDow <$> P.take 7
-  fromMaybe (fail "Days of week parsing failed") $ return <$> d
+dowP = sum <$> (sequence $ step <$> ['1'..'7']) <?> "Days of week"
+  where step n = P.char n   *> (pure . bit $ ord n - ord '1')
+             <|> P.char ' ' *> (pure 0)
+
+-- | Parser for ports.
+portP :: Parser Port
+portP = sum <$> (sequence $ step <$> [0,1,2]) <?> "Port"
+  where step n = (* 26^n) . subtract (ord 'A') . ord <$> P.satisfy letter
+        letter c = c >= 'A' && c <= 'Z'
 
 segmentP = P.char '4' >> P.take 199 >> (some P.endOfLine) >> return Segment
 
