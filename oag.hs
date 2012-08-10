@@ -30,6 +30,7 @@ type PeriodBoundary = Maybe Day
 type Dow = Word8
 type Port = Int
 type AirlineCode = Int
+type TimeVariation = Int
 
 data Header = Header deriving Show
 
@@ -103,7 +104,7 @@ legPeriodP = do
   void $ P.take 4
   autc <- P.take 5
   void $ P.take (2+3+20+5+10+9+2+6)
-  iviH <- decimalP 1        <?> "Leg itinerary variation identifier (high)"
+  iviH <- paddedDecimalP 1  <?> "Leg itinerary variation identifier (high)"
   void $ P.take (3+3+3+9+1+1+1+11+1+11+20)
   dvar <- P.anyChar
   avar <- P.anyChar
@@ -116,8 +117,8 @@ legPeriodP = do
   return $ LegPeriod flight period variation leg
 
 -- | Parser for fixed length decimal numbers with space padding.
-decimalP :: Int -> Parser Int
-decimalP n = do
+paddedDecimalP :: Int -> Parser Int
+paddedDecimalP n = do
   s <- P.take n
   let i = if B8.null stripped then Just (0, B8.empty) else B8.readInt stripped
           where stripped = B8.dropWhile (== ' ') s
@@ -125,14 +126,14 @@ decimalP n = do
           $ (return . fst) <$> i
 
 -- | Parser for fixed length decimal numbers.
-decimalP' :: Int -> Parser Int
-decimalP' n = do
+decimalP :: Int -> Parser Int
+decimalP n = do
   i <- B8.readInt <$> P.take n
   fromMaybe (fail "Decimal parsing failed") $ (return . fst) <$> i
 
 -- | Parser for days.
 dayP :: Parser Int
-dayP = decimalP' 2
+dayP = decimalP 2
 
 -- | Parser for months.
 monthP :: Parser Int
@@ -144,7 +145,7 @@ monthP = do
 
 -- | Parser for years.
 yearP :: Num a => Parser a
-yearP = (fromIntegral . (2000+)) <$> decimalP' 2
+yearP = (fromIntegral . (2000+)) <$> decimalP 2
 
 -- | Parser for period boundaries.
 periodBoundaryP :: Parser PeriodBoundary
@@ -157,14 +158,14 @@ periodBoundaryP = do
 
 -- | Parser for flight numbers.
 fnumP :: Parser Int
-fnumP = decimalP 4
+fnumP = paddedDecimalP 4
 
 -- | Parser for airline codes.
 airlineP :: Parser AirlineCode
 airlineP = sum <$> (sequence $ map step [0,1,2 :: Int]) <?> "Airline code"
   where step n = (* 37^n) <$> code n
-        code n | n < 2     = letter <|>  digit
-               | otherwise = letter <|>  digit <|> space
+        code n | n < 2     = letter <|> digit
+               | otherwise = letter <|> digit <|> space
         letter = (+11) . subtract (ord 'A') . ord <$> P.satisfy (\c -> c >= 'A' && c <= 'Z')
         digit  =  (+1) . subtract (ord '0') . ord <$> P.digit
         space  = pure 0 <* P.space
@@ -184,15 +185,19 @@ portP = sum <$> (sequence $ map step [0,1,2 :: Int]) <?> "Port"
 -- | Parser for local times.
 localTimeP :: Parser TimeOfDay
 localTimeP = do
-  m <- makeTimeOfDayValid <$> decimalP' 2 <*> decimalP' 2 <*> pure 0
+  m <- makeTimeOfDayValid <$> decimalP 2 <*> decimalP 2 <*> pure 0
   fromMaybe (fail "Local time parsing failed") $ return <$> m
 
 -- | Parser for time variations.
-timeVariationP :: Parser Int
+timeVariationP :: Parser TimeVariation
 timeVariationP = (plus <|> minus) <*> time
   where plus = P.char '+' *> pure id
         minus = P.char '-' *> pure negate
-        time = (+) <$> ((*60) <$> decimalP' 2) <*> decimalP' 2
+        time = do
+          h <- decimalP 2; m <- decimalP 2
+          if h <= 23 && m <= 59
+            then return $ 60 * h + m
+            else fail "Time variation parsing failed"
 
 segmentP :: Parser Segment
 segmentP = do
