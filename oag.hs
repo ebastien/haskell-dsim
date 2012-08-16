@@ -83,15 +83,24 @@ data Leg = Leg { lSequence :: !Int
                } deriving Show
 
 data LegPeriod = LegPeriod { lpFlight :: Flight
-                           , lpPeriod :: Period
                            , lpVariation :: !Int
+                           , lpPeriod :: Period
                            , lpLeg :: Leg
                            } deriving Show
 
-data Segment = Segment deriving Show
+data Segment = Segment { sIndex :: !Int
+                       , sBoard :: !Port
+                       , sOff :: !Port
+                       , sDEI :: !Int
+                       } deriving Show
+
+data SegmentData = SegmentData { sdFlight :: Flight
+                               , sdVariation :: Int
+                               , sdSegment :: Segment
+                               } deriving Show
 
 data LegGroup = LegGroup { lgLeg :: LegPeriod
-                         , lgSegments :: [Segment] } deriving Show
+                         , lgSegments :: [SegmentData] } deriving Show
 
 data CarrierGroup = CarrierGroup { cgCarrier :: Carrier
                                  , cgLegs :: [LegGroup] } deriving Show
@@ -244,14 +253,14 @@ legPeriodP = do
       period = Period bdate edate dow
       etime = (atime - atvar + advar) - (dtime - dtvar + ddvar)
       leg = Leg lsn bpoint opoint dtime atime etime
-  return $ LegPeriod flight period variation leg
+  return $ LegPeriod flight variation period leg
 
 -- | Parser for segment records.
-segmentP :: Parser Segment
+segmentP :: Parser SegmentData
 segmentP = do
-  void $ P.char '4'
-  suffix <- P.anyChar
-  airline <- airlineP
+  void (P.char '4')         <?> "Segment record type"
+  suffix <- P.anyChar       <?> "Segment operational suffix"
+  airline <- airlineP       <?> "Segment airline code"
   fnum <- fnumP             <?> "Segment flight number"
   iviL <- decimalP 2        <?> "Segment itinerary variation identifier (low)"
   lsn <- decimalP 2         <?> "Segment leg sequence number"
@@ -266,7 +275,11 @@ segmentP = do
   void $ P.take 155
   void $ P.take 6
   void $ some P.endOfLine
-  return Segment
+  let variation = iviL + 100 * iviH
+      flight = Flight airline fnum suffix
+      idx = undefined
+      segment = Segment idx bpoint opoint dei
+  return $ SegmentData flight variation segment
 
 -- | Parser for trailer records.
 trailerP :: Parser ()
