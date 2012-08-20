@@ -1,5 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+module OAG
+    ( Port
+    , 
+    ) where
+
 import Criterion.Main
 
 import qualified Data.ByteString.Char8 as B8
@@ -179,6 +184,9 @@ portP :: Parser Port
 portP = MkPort <$> packWith 3 step <?> "Port"
   where step n = (* 26^n) . subtract (ord 'A') . ord <$> P.satisfy letter
         letter c = c >= 'A' && c <= 'Z'
+
+toPort :: B8.ByteString -> Maybe Port
+toPort s = either (const Nothing) Just $ P.parseOnly portP s
 
 -- | Parser for schedule times.
 scheduleTimeP :: Parser ScheduleTime

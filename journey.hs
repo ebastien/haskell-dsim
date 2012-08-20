@@ -3,79 +3,48 @@ import Data.Array.IArray
 import Data.Tuple (swap)
 import Control.Monad (guard)
 
-data FlightKey = FlightKey {
-}
-
-data SegmentPeriod = SegmentPeriod {
-  spKey :: FlightKey,
-  spSegment :: Segment
-}
-
-data Segment = Segment {
-  sgKey :: SegmentKey,
-  sgLegs :: SegmentLegs
-}
-
-type SegmentKey = OnD
-
-data SegmentLegs = SegmentLegs {
-  slBoard :: Leg,
-  slVia :: [Leg],
-  slOff :: Leg
-}
-
-data Leg = Leg {
-  lgKey :: LegKey
-}
-
-type LegKey = OnD
-
-type OnD = (Port, Port)
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
+import qualified Data.Vector as V
 
 type Port = Int
 
--- 
-
-type Distance = Double
-
-type Coord = (Double, Double)
-
-data Move = Move Distance Coord deriving Show
+type OnD = (Port, Port)
 
 type Path = [Port]
 
-data Outbound = Outbound Path Port [Move] deriving Show
-
-data Inbound = Inbound Port Coord Move deriving Show
-
 type PortBounds = (Port, Port)
 
-type PortsCoverage = Array Port [Outbound]
+type Distance = Double
 
-type PortsAdjacency = Array Port [(Port, Coord, Coord, Distance)]
+class NormedSpace a where
+  distance :: a -> a -> Distance
 
+data Move a = Move Distance a deriving Show
+
+data Outbound a = Outbound Path Port [Move a] deriving Show
+
+type PortsCoverage a = Array Port [Outbound a]
+
+type PortsAdjacency a = Array Port [(Port, a, a, Distance)]
+
+-- | Group a list of pairs by port, generating an array
 group_by_port :: PortBounds -> [(Port, a)] -> Array Port [a]
-group_by_port bnds = accumArray (flip (:)) [] bnds
+group_by_port = accumArray (flip (:)) []
 
-coordinates :: Port -> Coord
-coordinates _ = (0.0, 0.0)
-
-orthodromic_distance :: Coord -> Coord -> Distance
-orthodromic_distance _ _ = 1.0
-
--- Predicate for competitive itinerary according to direct vs. indirect distances
-competitive_itinerary :: Coord -> Distance -> [Move] -> Bool
+-- | Predicate for competitive itinerary according to direct vs. indirect distances
+competitive_itinerary :: (NormedSpace a) => a -> Distance -> [Move a] -> Bool
 competitive_itinerary coord0 dist0 moves = all competitive steps
   where competitive (indirect, direct) = (indirect * ratio) < direct
         ratio = 0.6
         steps = scanl compose (dist0, dist0) moves
         compose (indirect, _) (Move dist coord) = (indirect', direct)
           where indirect' = indirect + dist
-                direct = orthodromic_distance coord0 coord
+                direct = distance coord0 coord
 
--- Extend the coverage by one more stop
-extend_coverage :: PortsCoverage -> PortsAdjacency -> PortsCoverage
-extend_coverage cov adj | bnds == bounds adj = cov'
+-- | Extend the coverage by one more stop
+extend_coverage :: (NormedSpace a) => PortsAdjacency a -> PortsCoverage a -> PortsCoverage a
+extend_coverage adj cov | bnds == bounds adj = cov'
   where bnds = bounds cov
         cov' = group_by_port bnds outbounds
         outbounds = concatMap extend $ zip (assocs cov) (assocs adj)
@@ -87,36 +56,52 @@ extend_coverage cov adj | bnds == bounds adj = cov'
               moves' = (Move distance coord_port):moves
           return (org, Outbound stops' dst moves')
 
--- Initial ports coverage from adjacency list
-initial_coverage :: PortsAdjacency -> PortsCoverage
-initial_coverage adj = group_by_port (bounds adj) $ concatMap adj_to_cov $ assocs adj
+-- | Direct ports coverage from adjacency list
+direct_coverage :: (NormedSpace a) => PortsAdjacency a -> PortsCoverage a
+direct_coverage adj = group_by_port (bounds adj) $ concatMap adj_to_cov $ assocs adj
   where adj_to_cov (dst, adjs) = do
           (org, _, coord_dst, distance) <- adjs
           let move = Move distance coord_dst
           return (org, Outbound [] dst [move])
 
--- Ports adjacency from direct OnDs
-adjacency :: PortBounds -> [OnD] -> PortsAdjacency
-adjacency bnds onds = group_by_port bnds $ map make_edge onds
-  where make_edge (org, dst) = (dst, (org, coord_org, coord_dst, distance))
-          where distance = orthodromic_distance coord_org coord_dst
-                coord_org = coordinates org
-                coord_dst = coordinates dst
+-- | List of all coverages in path length order
+coverages :: (NormedSpace a) => PortsAdjacency a -> [PortsCoverage a]
+coverages adj = iterate (extend_coverage adj) (direct_coverage adj)
 
-p0 = 0
-p1 = 1
-p2 = 2
-p3 = 3
+--
 
-onds = [
-       (p0, p1),
-       (p2, p3),
-       (p3, p0),
-       (p3, p1)
-       ] :: [OnD]
+newtype GeoCoord = GeoCoord (Double, Double) deriving Show
 
-bnds = (p0, p3)
+orthodromic_distance :: GeoCoord -> GeoCoord -> Distance
+orthodromic_distance _ _ = 1.0
+
+instance NormedSpace GeoCoord where
+  distance = orthodromic_distance
+
+type PortsSet = Array Port GeoCoord
+
+loadPorts :: String -> IO PortsSet
+loadPorts f = return . accumArray (flip const) def (0,1) . map parse . drop 1 . T.lines =<< T.readFile f
+  where def = GeoCoord (0.0,0.0)
+        parse row = (port, GeoCoord (lat, lon))
+          where col = V.fromList $ T.split (=='^') row
+                port = undefined -- col V.! 0
+                lat = read . T.unpack $ col V.! 7
+                lon = read . T.unpack $ col V.! 8
+
+-- | Ports adjacency in geographic coordinates
+adjacency :: PortsSet -> [OnD] -> PortsAdjacency GeoCoord
+adjacency ports onds = group_by_port (bounds ports) $ map make_edge onds
+  where make_edge (org, dst) = (dst, (org, coord_org, coord_dst, dist))
+          where dist = distance coord_org coord_dst
+                coord_org = (ports ! org)
+                coord_dst = (ports ! dst)
 
 -- 
 
-main = return ()
+main = do
+  ports <- loadPorts "ports.csv"
+  let adj = adjacency ports [(0,1)]
+      cov = take 3 $ coverages adj
+  putStrLn $ show cov
+
