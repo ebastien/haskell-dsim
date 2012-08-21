@@ -1,8 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module OAG
+module Ssim
     ( Port
-    , 
+    , toPort
     ) where
 
 import Criterion.Main
@@ -32,6 +33,8 @@ import Data.Char (chr, ord)
 
 import Data.ByteString.Lex.Integral (readDecimal)
 
+import Data.Ix (Ix)
+
 newtype Dow = MkDow Word8
 
 instance Show Dow where
@@ -39,24 +42,24 @@ instance Show Dow where
     where step w n | testBit w n = chr (n + ord '1')
                    | otherwise       = ' '
 
-newtype AirlineCode = MkAirlineCode Int
+newtype AirlineCode = MkAirlineCode Int deriving (Eq, Ord, Ix)
 
 instance Show AirlineCode where
-  show (MkAirlineCode n) = loop n
-    where loop n | n == 0    = []
-                 | otherwise = let (q,r) = divMod n 37
-                                   c | r == 0    = ' '
-                                     | r < 11    = chr (r -  1 + ord '0')
-                                     | otherwise = chr (r - 11 + ord 'A')
-                               in c : loop q
+  show (MkAirlineCode a) = loop 3 a
+    where loop n a | n == 0    = []
+                   | otherwise = c : loop (n-1) q
+          (q,r) = divMod a 37
+          c | r == 0    = ' '
+            | r < 11    = chr (r -  1 + ord '0')
+            | otherwise = chr (r - 11 + ord 'A')
 
-newtype Port = MkPort Int
+newtype Port = MkPort Int deriving (Eq, Ord, Ix, Enum)
 
 instance Show Port where
-  show (MkPort n) = loop n
-    where loop n | n == 0    = []
-                 | otherwise = let (q,r) = divMod n 26
-                               in chr (r + ord 'A') : loop q
+  show (MkPort p) = loop 3 p
+    where loop n p | n == 0    = []
+                   | otherwise = chr (r + ord 'A') : loop (n-1) q
+          (q,r) = divMod p 26
 
 type PeriodBoundary = Maybe Day
 type TimeDuration = DiffTime
@@ -185,8 +188,17 @@ portP = MkPort <$> packWith 3 step <?> "Port"
   where step n = (* 26^n) . subtract (ord 'A') . ord <$> P.satisfy letter
         letter c = c >= 'A' && c <= 'Z'
 
+-- | ByteString parsing to Maybe.
+maybeParse :: Parser a -> B8.ByteString -> Maybe a
+maybeParse p = either (const Nothing) Just . P.parseOnly p
+
+-- | Try to convert a ByteString to a Port.
 toPort :: B8.ByteString -> Maybe Port
-toPort s = either (const Nothing) Just $ P.parseOnly portP s
+toPort = maybeParse portP
+
+-- | Try to convert a ByteString to an AirlineCode.
+toAirlineCode :: B8.ByteString -> Maybe AirlineCode
+toAirlineCode = maybeParse airlineP
 
 -- | Parser for schedule times.
 scheduleTimeP :: Parser ScheduleTime
