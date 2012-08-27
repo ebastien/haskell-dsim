@@ -25,15 +25,14 @@ import Data.Time.LocalTime (TimeOfDay, makeTimeOfDayValid, timeOfDayToTime)
 import Data.Time.Calendar (Day, fromGregorianValid)
 import Data.Time.Clock (DiffTime, secondsToDiffTime)
 
-import Data.List (elemIndex)
+import Data.List (elemIndex, groupBy)
+import Data.Function (on)
 
 import Data.Word (Word8)
 import Data.Bits (bit, testBit)
 import Data.Char (chr, ord)
 
 import Data.ByteString.Lex.Integral (readDecimal)
-
-import Data.Ix (Ix)
 
 newtype Dow = MkDow Word8
 
@@ -42,7 +41,7 @@ instance Show Dow where
     where step w n | testBit w n = chr (n + ord '1')
                    | otherwise       = ' '
 
-newtype AirlineCode = MkAirlineCode Int deriving (Eq, Ord, Ix)
+newtype AirlineCode = MkAirlineCode Int deriving (Eq, Ord)
 
 instance Show AirlineCode where
   show (MkAirlineCode a) = loop 3 a
@@ -53,7 +52,7 @@ instance Show AirlineCode where
                     | r < 11    = chr (r -  1 + ord '0')
                     | otherwise = chr (r - 11 + ord 'A')
 
-newtype Port = MkPort Int deriving (Eq, Ord, Ix, Enum)
+newtype Port = MkPort Int deriving (Eq, Ord, Enum)
 
 instance Show Port where
   show (MkPort p) = loop 3 p
@@ -103,15 +102,17 @@ data Segment = Segment { sIndex :: !Int
                        } deriving Show
 
 data SegmentData = SegmentData { sdFlight :: Flight
-                               , sdVariation :: Int
+                               , sdVariation :: !Int
                                , sdSegment :: Segment
                                } deriving Show
 
 data LegGroup = LegGroup { lgLeg :: LegPeriod
                          , lgSegments :: [SegmentData] } deriving Show
 
+type FlightGroup = [LegGroup]
+
 data CarrierGroup = CarrierGroup { cgCarrier :: Carrier
-                                 , cgLegs :: [LegGroup] } deriving Show
+                                 , cgLegs :: [FlightGroup] } deriving Show
 
 data Ssim = Ssim { ssimHeader :: Header
                  , ssimCarriers :: [CarrierGroup] } deriving Show
@@ -224,6 +225,12 @@ dateVariationP = secondsToDiffTime . (*86400) . fromIntegral
   where before = pure (-1) <* P.char 'A'
         after  = subtract (ord '0') . ord <$> P.digit
 
+-- | Parser for board and off points indicators.
+pointsIndicatorP :: Parser Int
+pointsIndicatorP = packWith 2 step <?> "Board and off points indicator"
+  where step n = (* 26^n) . subtract (ord 'A') . ord <$> P.satisfy letter
+        letter c = c >= 'A' && c <= 'Z'
+
 -- | Parser for header records.
 headerP :: Parser Header
 headerP  = P.char '1' >> P.take 199 >> (some P.endOfLine) >> return Header
@@ -287,8 +294,7 @@ segmentP = do
   void $ P.anyChar
   void $ P.take 13
   iviH <- paddedDecimalP 1  <?> "Segment itinerary variation identifier (high)"
-  void $ P.anyChar
-  void $ P.anyChar
+  idx <- pointsIndicatorP   <?> "Segment points indicator"
   dei <- decimalP 3         <?> "Segment DEI"
   bpoint <- portP           <?> "Segment board point"
   opoint <- portP           <?> "Segment off point"
@@ -297,7 +303,6 @@ segmentP = do
   void $ some P.endOfLine
   let variation = iviL + 100 * iviH
       flight = Flight airline fnum suffix
-      idx = undefined
       segment = Segment idx bpoint opoint dei
   return $ SegmentData flight variation segment
 
@@ -315,8 +320,9 @@ legGroupP = LegGroup <$> (legPeriodP    <?> "Leg record")
 
 -- | Parser for carrier groups.
 carrierGroupP :: Parser CarrierGroup
-carrierGroupP = CarrierGroup <$> (carrierP       <?> "Carrier record")
-                             <*> (some legGroupP <?> "Carrier legs")
+carrierGroupP = CarrierGroup <$> (carrierP               <?> "Carrier record")
+                             <*> (grp <$> some legGroupP <?> "Carrier legs")
+  where grp = groupBy ((==) `on` lpVariation . lgLeg)
 
 -- | Parser for SSIM file.
 ssimP :: Parser Ssim
