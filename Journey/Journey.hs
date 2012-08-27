@@ -99,8 +99,8 @@ data Edge e = Edge
     deriving (Show)
 
 -- | Predicate for competitive itinerary according to direct vs. indirect distances.
-competitive_itinerary :: (MetricSpace e) => e -> Distance -> [Step e] -> Bool
-competitive_itinerary elem0 dist0 steps = all competitive itineraries
+isCompetitive :: (MetricSpace e) => e -> Distance -> [Step e] -> Bool
+isCompetitive elem0 dist0 steps = all competitive itineraries
   where competitive (indirect, direct) = indirect < ratio * direct
         ratio = 10
         itineraries = scanl compose (dist0, dist0) steps
@@ -109,13 +109,13 @@ competitive_itinerary elem0 dist0 steps = all competitive itineraries
                 direct = distance elem0 elem
 
 -- | Extend the coverage by one more step.
-extend_coverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e -> PortsCoverage e
-extend_coverage adj cov = groupByPort outbounds
+extendedCoverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e -> PortsCoverage e
+extendedCoverage adj cov = groupByPort outbounds
   where outbounds = concatMap extend $ zjoin (toPortAssocs cov) (toPortAssocs adj)
         extend (port, covs, adjs) = do
           Edge port0 elem0 elem dist0 <- adjs
           Itinerary path dest steps <- covs
-          guard $ competitive_itinerary elem0 dist0 steps
+          guard $ isCompetitive elem0 dist0 steps
           let path' = port : path
               steps' = (Step dist0 elem) : steps
           return (port0, Itinerary path' dest steps')
@@ -129,14 +129,14 @@ zjoin x@((xa,xb):xs) y@((ya,yb):ys) | xa > ya   = zjoin x ys
                                     | otherwise = (xa,xb,yb) : zjoin xs ys
 
 -- | Direct ports coverage from adjacency list.
-direct_coverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e
-direct_coverage adj = groupByPort $ concatMap adj_to_cov (toPortAssocs adj)
+directCoverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e
+directCoverage adj = groupByPort $ concatMap adj_to_cov (toPortAssocs adj)
   where adj_to_cov (port, adjs) = [ (port0, Itinerary [] port [Step dist0 elem])
                                   | Edge port0 _ elem dist0 <- adjs ]
 
 -- | List of all coverages in path length order.
 coverages :: (MetricSpace e) => PortsAdjacency e -> [PortsCoverage e]
-coverages adj = iterate (extend_coverage adj) (direct_coverage adj)
+coverages adj = iterate (extendedCoverage adj) (directCoverage adj)
 
 {-
   Geographic coordinates space
@@ -145,15 +145,15 @@ coverages adj = iterate (extend_coverage adj) (direct_coverage adj)
 newtype GeoCoord = GeoCoord (Double, Double) deriving (Show)
 
 -- | The orthodromic distance between two geographic coordinates.
-orthodromic_distance :: GeoCoord -> GeoCoord -> Distance
-orthodromic_distance _ _ = 1.0
+orthodromicDistance :: GeoCoord -> GeoCoord -> Distance
+orthodromicDistance _ _ = 1.0
 
 instance MetricSpace GeoCoord where
-  distance = orthodromic_distance
+  distance = orthodromicDistance
 
 type PortsInfo = PortMap GeoCoord
 
--- | Load ports information from the given file.
+-- | Load ports information from a file.
 loadPorts :: String -> IO PortsInfo
 loadPorts f = return . fromPortAssocs . map parse . drop 1 . T.lines =<< T.readFile f
   where parse row = (port, GeoCoord (lat, lon))
