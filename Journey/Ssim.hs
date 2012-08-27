@@ -3,6 +3,7 @@
 
 module Ssim
     ( Port
+    , OnD
     , toPort
     ) where
 
@@ -16,7 +17,7 @@ import qualified Data.Attoparsec.ByteString.Char8 as P
 import qualified Data.Attoparsec.ByteString.Lazy as LP
 
 import Data.Functor ((<$>))
-import Control.Monad (void)
+import Control.Monad (void, join)
 import Control.Applicative (pure, some, (<*>), (<*), (*>), (<|>))
 
 import Data.Maybe (fromMaybe)
@@ -59,6 +60,9 @@ instance Show Port where
     where loop n i | n == 0    = []
                    | otherwise = chr (r + ord 'A') : loop (n-1) q
             where (q,r) = divMod i 26
+
+-- | Origin & Destination.
+type OnD = (Port, Port)
 
 type PeriodBoundary = Maybe Day
 type TimeDuration = DiffTime
@@ -112,7 +116,7 @@ data LegGroup = LegGroup { lgLeg :: LegPeriod
 type FlightGroup = [LegGroup]
 
 data CarrierGroup = CarrierGroup { cgCarrier :: Carrier
-                                 , cgLegs :: [FlightGroup] } deriving Show
+                                 , cgFlights :: [FlightGroup] } deriving Show
 
 data Ssim = Ssim { ssimHeader :: Header
                  , ssimCarriers :: [CarrierGroup] } deriving Show
@@ -330,12 +334,31 @@ ssimP = Ssim <$> (headerP            <?> "SSIM7 header")
              <*> (some carrierGroupP <?> "SSIM7 carriers")
              <*  (trailerP           <?> "SSIM7 trailer")
 
+flightOnDs :: FlightGroup -> [OnD]
+flightOnDs = join . combine . map (lpLeg . lgLeg)
+  where combine as@(x:xs) = [ (lBoard x, lOff y) | y <- as ] : combine xs
+        combine []        = []
+
+ssimOnDs :: Ssim -> [OnD]
+ssimOnDs ssim = do
+  car <- ssimCarriers ssim
+  flt <- cgFlights car
+  flightOnDs flt
+
 -- | Run the SSIM parser on the given file.
-parseSsimFile :: String -> IO (LP.Result Ssim)
-parseSsimFile s = LP.parse ssimP <$> LB.readFile s
+readSsimFile :: String -> IO Ssim
+readSsimFile s = do
+  ssim <- LP.maybeResult . LP.parse ssimP <$> LB.readFile s
+  fromMaybe (fail "Error reading SSIM file")
+          $ return <$> ssim
+
+test :: IO ()
+test = putStrLn . show . ssimOnDs =<< readSsimFile input
+  where input = "../oag.ssim7.small"
 
 main :: IO ()
 main = defaultMain [
-  bench "lazy" $ whnfIO $ parseSsimFile input
+  bench "lazy" $ whnfIO $ readSsimFile input
   ]
   where input = "oag.ssim7.sample"
+

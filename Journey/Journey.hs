@@ -15,14 +15,11 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
 import qualified Data.IntMap as M
 
-import Ssim (Port, toPort)
+import Ssim (Port, OnD, toPort)
 
 {-
   Ports
 -}
-
--- | Origin & Destination.
-type OnD = (Port, Port)
 
 -- | A sequence of ports.
 type Path = [Port]
