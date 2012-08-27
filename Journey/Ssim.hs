@@ -46,20 +46,20 @@ newtype AirlineCode = MkAirlineCode Int deriving (Eq, Ord, Ix)
 
 instance Show AirlineCode where
   show (MkAirlineCode a) = loop 3 a
-    where loop n a | n == 0    = []
+    where loop n i | n == 0    = []
                    | otherwise = c : loop (n-1) q
-          (q,r) = divMod a 37
-          c | r == 0    = ' '
-            | r < 11    = chr (r -  1 + ord '0')
-            | otherwise = chr (r - 11 + ord 'A')
+            where (q,r) = divMod i 37
+                  c | r == 0    = ' '
+                    | r < 11    = chr (r -  1 + ord '0')
+                    | otherwise = chr (r - 11 + ord 'A')
 
 newtype Port = MkPort Int deriving (Eq, Ord, Ix, Enum)
 
 instance Show Port where
   show (MkPort p) = loop 3 p
-    where loop n p | n == 0    = []
+    where loop n i | n == 0    = []
                    | otherwise = chr (r + ord 'A') : loop (n-1) q
-          (q,r) = divMod p 26
+            where (q,r) = divMod i 26
 
 type PeriodBoundary = Maybe Day
 type TimeDuration = DiffTime
