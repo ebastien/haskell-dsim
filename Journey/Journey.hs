@@ -1,7 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Journey (
-      main
+      test
+    , loadPorts
+    , adjacency
+    , coverages
+    , coveragePaths
     ) where
     
 import Control.Monad (guard, join)
@@ -45,6 +49,9 @@ findByPort (MkPortMap m) p = m M.! (fromEnum p)
 
 toPorts :: PortMap a -> [Port]
 toPorts (MkPortMap m) = map toEnum $ M.keys m
+
+portsSize :: PortMap a -> Int
+portsSize (MkPortMap m) = M.size m
 
 {-
   Metric space
@@ -93,7 +100,7 @@ data Edge e = Edge
 isCompetitive :: (MetricSpace e) => e -> Distance -> [Step e] -> Bool
 isCompetitive elem0 dist0 steps = all competitive itineraries
   where competitive (indirect, direct) = indirect < ratio * direct
-        ratio = 10
+        ratio = 1.5
         itineraries = scanl compose (dist0, dist0) steps
         compose (indirect, _) (Step distN elemN) = (indirect', direct)
           where indirect' = indirect + distN
@@ -101,15 +108,14 @@ isCompetitive elem0 dist0 steps = all competitive itineraries
 
 -- | Extend the coverage by one more step.
 extendedCoverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e -> PortsCoverage e
-extendedCoverage adj cov = groupByPort outbounds
-  where outbounds = concatMap extend $ zjoin (toPortAssocs cov) (toPortAssocs adj)
-        extend (port, covs, adjs) = do
-          Edge portA elemA elemB distAB <- adjs
-          Itinerary path dest steps <- covs
-          guard $ isCompetitive elemA distAB steps
-          let path' = port : path
-              steps' = (Step distAB elemB) : steps
-          return (portA, Itinerary path' dest steps')
+extendedCoverage adj cov = groupByPort $ do
+  (portB, covs, adjs) <- zjoin (toPortAssocs cov) (toPortAssocs adj)
+  Edge portA elemA elemB distAB <- adjs
+  Itinerary path dest steps <- covs
+  guard $ isCompetitive elemA distAB steps
+  let path' = portB : path
+      steps' = (Step distAB elemB) : steps
+  return (portA, Itinerary path' dest steps')
 
 -- | Join two lists of pairs sorted by the first element.
 zjoin :: (Ord a) => [(a,b)] -> [(a,c)] -> [(a,b,c)]
@@ -129,6 +135,10 @@ directCoverage adj = groupByPort $ concatMap adj_to_cov (toPortAssocs adj)
 coverages :: (MetricSpace e) => PortsAdjacency e -> [PortsCoverage e]
 coverages adj = iterate (extendedCoverage adj) (directCoverage adj)
 
+-- | List of paths from coverage.
+coveragePaths cov = [ org : path ++ [dst] | (org, i) <- toPortAssocs cov,
+                                            Itinerary path dst steps <- i ]
+
 {-
   Geographic coordinates space
 -}
@@ -137,7 +147,12 @@ newtype GeoCoord = GeoCoord (Double, Double) deriving (Show)
 
 -- | The orthodromic distance between two geographic coordinates.
 orthodromicDistance :: GeoCoord -> GeoCoord -> Distance
-orthodromicDistance _ _ = 1.0
+orthodromicDistance (GeoCoord (latA, lonA)) (GeoCoord (latB, lonB)) = dist
+  where dist = 2.0 * radius * (asin . sqrt $ sin2_dLat + cos2_lat * sin2_dLon)
+        sin2_dLat = (^(2::Int)) . sin $ (latB - latA) / 2.0
+        sin2_dLon = (^(2::Int)) . sin $ (lonB - lonA) / 2.0
+        cos2_lat = cos latA * cos latB
+        radius = 6367.0
 
 instance MetricSpace GeoCoord where
   distance = orthodromicDistance
@@ -147,11 +162,12 @@ type PortsInfo = PortMap GeoCoord
 -- | Load ports information from a file.
 loadPorts :: String -> IO PortsInfo
 loadPorts f = return . fromPortAssocs . map parse . drop 1 . T.lines =<< T.readFile f
-  where parse row = (port, GeoCoord (lat, lon))
-          where col = V.fromList $ T.split (=='^') row
-                port = fromJust . toPort . T.encodeUtf8 $ col V.! 0
+  where radian d = d * pi / 180.0
+        parse row = (port, GeoCoord (radian lat, radian lon))
+          where port = fromJust . toPort . T.encodeUtf8 $ col V.! 0
                 lat = read . T.unpack $ col V.! 7
                 lon = read . T.unpack $ col V.! 8
+                col = V.fromList $ T.split (=='^') row
 
 -- | Ports adjacency in geographic coordinates.
 adjacency :: PortsInfo -> [OnD] -> PortsAdjacency GeoCoord
@@ -161,20 +177,13 @@ adjacency ports onds = groupByPort $ map make_edge onds
                 coord_org = findByPort ports org
                 coord_dst = findByPort ports dst
 
-{-
-  Entry point
--}
-
-testOnDs :: [(ByteString, ByteString)]
-testOnDs = [("NCE", "CDG")
-           ,("CDG", "FRA")
-           ,("FRA", "JFK")
-           ,("CDG", "JFK")] 
-
-main :: IO ()
-main = do
+test :: IO ()
+test = do
   ports <- loadPorts "ports.csv"
-  let adj = adjacency ports $ map (join (***) (fromJust . toPort)) testOnDs
+  let adj = adjacency ports $ map (join (***) (fromJust . toPort)) onds
       cov = take 3 $ coverages adj
   mapM_ (putStrLn . show) cov
-
+  where onds = [("NCE", "CDG")
+               ,("CDG", "FRA")
+               ,("FRA", "JFK")
+               ,("CDG", "JFK")] 

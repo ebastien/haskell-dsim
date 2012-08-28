@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Ssim (
-      main
+      readSsimFile
+    , ssimOnDs
     , test
     ) where
 
@@ -19,7 +20,7 @@ import Control.Applicative (pure, some, (<*>), (<*), (*>))
 
 import Data.Maybe (fromMaybe)
 
-import Data.List (groupBy)
+import Data.List (sort, group, groupBy)
 import Data.Function (on)
 
 import Types
@@ -167,9 +168,9 @@ flightOnDs = join . combine . map lgLeg
   where combine as@(x:xs) = [ (lpBoard x, lpOff y) | y <- as ] : combine xs
         combine []        = []
 
--- | Extract OnDs from a SSIM structure.
+-- | Extract unique OnDs from a SSIM structure.
 ssimOnDs :: Ssim -> [OnD]
-ssimOnDs ssim = do
+ssimOnDs ssim = map head . group . sort $ do
   car <- ssimCarriers ssim
   flt <- cgFlights car
   flightOnDs flt
@@ -181,17 +182,7 @@ readSsimFile s = do
   fromMaybe (fail "Error reading SSIM file")
           $ return <$> ssim
 
-{-
-  Entry points
--}
-
-sampleFile :: String
-sampleFile = "../oag.ssim7.small"
-
 test :: IO ()
-test = putStrLn . show . ssimOnDs =<< readSsimFile sampleFile
-
-main :: IO ()
-main = defaultMain [
-  bench "lazy" $ whnfIO $ readSsimFile sampleFile
+test = defaultMain [
+  bench "lazy" $ whnfIO $ readSsimFile "../oag/oag.ssim7.small"
   ]
