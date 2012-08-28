@@ -1,10 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Journey
-    () where
+module Journey (
+      main
+    ) where
     
-import Data.Array.IArray
-import Data.Tuple (swap)
 import Control.Monad (guard, join)
 import Data.Maybe (fromJust)
 import Control.Arrow ((***))
@@ -15,14 +14,9 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
 import qualified Data.IntMap as M
 
-import Ssim (Port, OnD, toPort)
+import Data.ByteString.Char8 (ByteString)
 
-{-
-  Ports
--}
-
--- | A sequence of ports.
-type Path = [Port]
+import Types
 
 -- | A sorted collection of port associations.
 newtype PortMap a = MkPortMap (M.IntMap a)
@@ -101,26 +95,26 @@ isCompetitive elem0 dist0 steps = all competitive itineraries
   where competitive (indirect, direct) = indirect < ratio * direct
         ratio = 10
         itineraries = scanl compose (dist0, dist0) steps
-        compose (indirect, _) (Step dist elem) = (indirect', direct)
-          where indirect' = indirect + dist
-                direct = distance elem0 elem
+        compose (indirect, _) (Step distN elemN) = (indirect', direct)
+          where indirect' = indirect + distN
+                direct = distance elem0 elemN
 
 -- | Extend the coverage by one more step.
 extendedCoverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e -> PortsCoverage e
 extendedCoverage adj cov = groupByPort outbounds
   where outbounds = concatMap extend $ zjoin (toPortAssocs cov) (toPortAssocs adj)
         extend (port, covs, adjs) = do
-          Edge port0 elem0 elem dist0 <- adjs
+          Edge portA elemA elemB distAB <- adjs
           Itinerary path dest steps <- covs
-          guard $ isCompetitive elem0 dist0 steps
+          guard $ isCompetitive elemA distAB steps
           let path' = port : path
-              steps' = (Step dist0 elem) : steps
-          return (port0, Itinerary path' dest steps')
+              steps' = (Step distAB elemB) : steps
+          return (portA, Itinerary path' dest steps')
 
 -- | Join two lists of pairs sorted by the first element.
 zjoin :: (Ord a) => [(a,b)] -> [(a,c)] -> [(a,b,c)]
-zjoin [] ys = []
-zjoin xs [] = []
+zjoin [] _ = []
+zjoin _ [] = []
 zjoin x@((xa,xb):xs) y@((ya,yb):ys) | xa > ya   = zjoin x ys
                                     | xa < ya   = zjoin xs y
                                     | otherwise = (xa,xb,yb) : zjoin xs ys
@@ -128,8 +122,8 @@ zjoin x@((xa,xb):xs) y@((ya,yb):ys) | xa > ya   = zjoin x ys
 -- | Direct ports coverage from adjacency list.
 directCoverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e
 directCoverage adj = groupByPort $ concatMap adj_to_cov (toPortAssocs adj)
-  where adj_to_cov (port, adjs) = [ (port0, Itinerary [] port [Step dist0 elem])
-                                  | Edge port0 _ elem dist0 <- adjs ]
+  where adj_to_cov (port, adjs) = [ (port0, Itinerary [] port [Step dist0 elem1])
+                                  | Edge port0 _ elem1 dist0 <- adjs ]
 
 -- | List of all coverages in path length order.
 coverages :: (MetricSpace e) => PortsAdjacency e -> [PortsCoverage e]
@@ -171,14 +165,16 @@ adjacency ports onds = groupByPort $ map make_edge onds
   Entry point
 -}
 
-onds = [("NCE", "CDG")
-       ,("CDG", "FRA")
-       ,("FRA", "JFK")
-       ,("CDG", "JFK")]
+testOnDs :: [(ByteString, ByteString)]
+testOnDs = [("NCE", "CDG")
+           ,("CDG", "FRA")
+           ,("FRA", "JFK")
+           ,("CDG", "JFK")] 
 
+main :: IO ()
 main = do
   ports <- loadPorts "ports.csv"
-  let adj = adjacency ports $ map (join (***) (fromJust . toPort)) onds
+  let adj = adjacency ports $ map (join (***) (fromJust . toPort)) testOnDs
       cov = take 3 $ coverages adj
   mapM_ (putStrLn . show) cov
 
