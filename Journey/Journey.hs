@@ -129,6 +129,7 @@ orthodromicDistance (GeoCoord (latA, lonA)) (GeoCoord (latB, lonB)) = dist
 instance MetricSpace GeoCoord where
   distance = orthodromicDistance
 
+-- | Geographic coordinates of ports.
 type PortsInfo = PortMap GeoCoord
 
 -- | Load ports information from a file.
