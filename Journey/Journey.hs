@@ -16,42 +16,12 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
-import qualified Data.IntMap as M
-
-import Data.ByteString.Char8 (ByteString)
 
 import Types
+import qualified EnumMap as M
 
 -- | A sorted collection of port associations.
-newtype PortMap a = MkPortMap (M.IntMap a)
-
-instance (Show a) => Show (PortMap a) where
-  show = show . toPortAssocs
-
--- | Create a collection from a list of port associations.
-fromPortAssocs :: [(Port, a)] -> PortMap a
-fromPortAssocs = MkPortMap . M.fromListWith const . map assoc
-  where assoc (p, v) = (fromEnum p, v)
-
--- | Group a list of associations by port creating a collection.
-groupByPort :: [(Port, a)] -> PortMap [a]
-groupByPort = MkPortMap . M.fromListWith (++) . map assoc
-  where assoc (p, v) = (fromEnum p, [v])
-
--- | Convert a collection to a sorted list of port associations.
-toPortAssocs :: PortMap a -> [(Port, a)]
-toPortAssocs (MkPortMap m) = map assoc $ M.assocs m
-  where assoc (p, v) = (toEnum p, v)
-
--- | Find the element associated to the given port.
-findByPort :: PortMap a -> Port -> a
-findByPort (MkPortMap m) p = m M.! (fromEnum p)
-
-toPorts :: PortMap a -> [Port]
-toPorts (MkPortMap m) = map toEnum $ M.keys m
-
-portsSize :: PortMap a -> Int
-portsSize (MkPortMap m) = M.size m
+type PortMap a = M.EnumMap Port a
 
 {-
   Metric space
@@ -108,8 +78,8 @@ isCompetitive elem0 dist0 steps = all competitive itineraries
 
 -- | Extend the coverage by one more step.
 extendedCoverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e -> PortsCoverage e
-extendedCoverage adj cov = groupByPort $ do
-  (portB, covs, adjs) <- zjoin (toPortAssocs cov) (toPortAssocs adj)
+extendedCoverage adj cov = M.group $ do
+  (portB, covs, adjs) <- zjoin (M.toList cov) (M.toList adj)
   Edge portA elemA elemB distAB <- adjs
   Itinerary path dest steps <- covs
   guard $ isCompetitive elemA distAB steps
@@ -127,17 +97,19 @@ zjoin x@((xa,xb):xs) y@((ya,yb):ys) | xa > ya   = zjoin x ys
 
 -- | Direct ports coverage from adjacency list.
 directCoverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e
-directCoverage adj = groupByPort $ concatMap adj_to_cov (toPortAssocs adj)
-  where adj_to_cov (port, adjs) = [ (port0, Itinerary [] port [Step dist0 elem1])
-                                  | Edge port0 _ elem1 dist0 <- adjs ]
+directCoverage adj = M.group $ do
+  (portB, adjs) <- M.toList adj
+  Edge portA _ elemB distAB <- adjs
+  return (portA, Itinerary [] portB [Step distAB elemB])
 
 -- | List of all coverages in path length order.
 coverages :: (MetricSpace e) => PortsAdjacency e -> [PortsCoverage e]
 coverages adj = iterate (extendedCoverage adj) (directCoverage adj)
 
 -- | List of paths from coverage.
-coveragePaths cov = [ org : path ++ [dst] | (org, i) <- toPortAssocs cov,
-                                            Itinerary path dst steps <- i ]
+coveragePaths :: (MetricSpace e) => PortsCoverage e -> [Path]
+coveragePaths cov = [ org : path ++ [dst] | (org, i) <- M.toList cov,
+                                            Itinerary path dst _ <- i ]
 
 {-
   Geographic coordinates space
@@ -161,7 +133,7 @@ type PortsInfo = PortMap GeoCoord
 
 -- | Load ports information from a file.
 loadPorts :: String -> IO PortsInfo
-loadPorts f = return . fromPortAssocs . map parse . drop 1 . T.lines =<< T.readFile f
+loadPorts f = return . M.fromList . map parse . drop 1 . T.lines =<< T.readFile f
   where radian d = d * pi / 180.0
         parse row = (port, GeoCoord (radian lat, radian lon))
           where port = fromJust . toPort . T.encodeUtf8 $ col V.! 0
@@ -171,11 +143,11 @@ loadPorts f = return . fromPortAssocs . map parse . drop 1 . T.lines =<< T.readF
 
 -- | Ports adjacency in geographic coordinates.
 adjacency :: PortsInfo -> [OnD] -> PortsAdjacency GeoCoord
-adjacency ports onds = groupByPort $ map make_edge onds
-  where make_edge (org, dst) = (dst, Edge org coord_org coord_dst dist)
+adjacency ports = M.group . map edge
+  where edge (org, dst) = (dst, Edge org coord_org coord_dst dist)
           where dist = distance coord_org coord_dst
-                coord_org = findByPort ports org
-                coord_dst = findByPort ports dst
+                coord_org = M.find ports org
+                coord_dst = M.find ports dst
 
 test :: IO ()
 test = do

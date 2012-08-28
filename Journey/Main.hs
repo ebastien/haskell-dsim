@@ -1,4 +1,4 @@
-module Demo (main) where
+module Main (main) where
 
 import Data.Functor ((<$>))
 import Text.Printf (printf)
@@ -14,9 +14,9 @@ import Journey (
 main :: IO ()
 main = do
   ports <- loadPorts "ports.csv"
-  onds <- ssimOnDs <$> readSsimFile "../oag/oag.ssim7.sample"
-  printf "%d OnDs loaded from SSIM file.\n" $ length onds
+  onds <- ssimOnDs <$> readSsimFile "../oag.ssim7.sample"
+  printf "%d OnDs loaded from SSIM file\n" $ length onds :: IO ()
   let adj = adjacency ports onds
       covs = take 8 $ coverages adj
-  mapM_ (print . length . coveragePaths) covs
+  mapM_ (printf "%d paths found\n" . length . coveragePaths) covs
   print . coveragePaths $ last covs
