@@ -3,10 +3,7 @@
 module Ssim (
       readSsimFile
     , ssimOnDs
-    , test
     ) where
-
-import Criterion.Main
 
 import qualified Data.ByteString.Lazy as LB
 
@@ -181,8 +178,3 @@ readSsimFile s = do
   ssim <- LP.maybeResult . LP.parse ssimP <$> LB.readFile s
   fromMaybe (fail "Error reading SSIM file")
           $ return <$> ssim
-
-test :: IO ()
-test = defaultMain [
-  bench "lazy" $ whnfIO $ readSsimFile "../oag/oag.ssim7.small"
-  ]

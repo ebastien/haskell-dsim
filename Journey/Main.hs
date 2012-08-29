@@ -2,6 +2,7 @@ module Main (main) where
 
 import Data.Functor ((<$>))
 import Text.Printf (printf)
+import System.Environment (getArgs)
 
 import Ssim (readSsimFile, ssimOnDs)
 import Journey (
@@ -13,8 +14,9 @@ import Journey (
 
 main :: IO ()
 main = do
-  ports <- loadPorts "ports.csv"
-  onds <- ssimOnDs <$> readSsimFile "../oag.ssim7.sample"
+  [portsFile, ssimFile] <- getArgs
+  ports <- loadPorts portsFile
+  onds <- ssimOnDs <$> readSsimFile ssimFile
   printf "%d OnDs loaded from SSIM file\n" $ length onds :: IO ()
   let adj = adjacency ports onds
       covs = take 8 $ coverages adj
