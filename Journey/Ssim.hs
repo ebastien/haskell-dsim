@@ -151,13 +151,13 @@ legGroupP = LegGroup <$> (legPeriodP    <?> "Leg record")
 carrierGroupP :: Parser CarrierGroup
 carrierGroupP = CarrierGroup <$> (carrierP               <?> "Carrier record")
                              <*> (grp <$> some legGroupP <?> "Carrier legs")
+                             <*  (trailerP               <?> "Carrier trailer")
   where grp = groupBy ((==) `on` lpFlight . lgLeg)
 
 -- | Parser for SSIM file.
 ssimP :: Parser Ssim
 ssimP = Ssim <$> (headerP            <?> "SSIM7 header")
              <*> (some carrierGroupP <?> "SSIM7 carriers")
-             <*  (trailerP           <?> "SSIM7 trailer")
 
 -- | Extract OnDs from a flight.
 flightOnDs :: FlightGroup -> [OnD]
@@ -175,6 +175,7 @@ ssimOnDs ssim = map head . group . sort $ do
 -- | Run the SSIM parser on the given file.
 readSsimFile :: String -> IO Ssim
 readSsimFile s = do
-  ssim <- LP.maybeResult . LP.parse ssimP <$> LB.readFile s
-  fromMaybe (fail "Error reading SSIM file")
-          $ return <$> ssim
+  result <- LP.parse ssimP <$> LB.readFile s
+  case result of
+    LP.Fail _ ctx msg -> fail . unlines $ msg:ctx
+    LP.Done _ ssim    -> return ssim
