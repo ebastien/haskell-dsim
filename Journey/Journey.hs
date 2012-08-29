@@ -11,6 +11,9 @@ module Journey (
 import Control.Monad (guard, join)
 import Data.Maybe (fromJust)
 import Control.Arrow ((***))
+import Data.List (groupBy, sortBy)
+import Data.Function (on)
+import Data.Traversable (traverse)
 
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -43,17 +46,15 @@ type Distance = Double
 type PortsCoverage e = PortMap [Itinerary e]
 
 -- | An itinerary.
-data Itinerary e = Itinerary
-    Path      -- via ports
-    Port      -- final destination
-    [Step e]  -- list of steps
-    deriving (Show)
+data Itinerary e = Itinerary { iPath  :: Path     -- via ports
+                             , iDest  :: Port     -- final destination
+                             , iSteps :: [Step e] -- list of steps
+                             } deriving (Show)
 
 -- | A step in the graph of ports.
-data Step e = Step
-    Distance  -- distance
-    e         -- destination element
-    deriving (Show)
+data Step e = Step { sDist :: Distance -- distance
+                   , sTo   :: e        -- to element
+                   } deriving (Show)
 
 -- | A graph of ports organized as adjacency by destination.
 type PortsAdjacency e = PortMap [Edge e]
@@ -79,9 +80,9 @@ isCompetitive elem0 dist0 steps = all competitive itineraries
 -- | Extend the coverage by one more step.
 extendedCoverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e -> PortsCoverage e
 extendedCoverage adj cov = M.group $ do
-  (portB, covs, adjs) <- zjoin (M.toList cov) (M.toList adj)
+  (portB, itis, adjs) <- zjoin (M.toList cov) (M.toList adj)
   Edge portA elemA elemB distAB <- adjs
-  Itinerary path dest steps <- covs
+  Itinerary path dest steps <- itis
   guard $ isCompetitive elemA distAB steps
   let path' = portB : path
       steps' = (Step distAB elemB) : steps
@@ -95,6 +96,11 @@ zjoin x@((xa,xb):xs) y@((ya,yb):ys) | xa > ya   = zjoin x ys
                                     | xa < ya   = zjoin xs y
                                     | otherwise = (xa,xb,yb) : zjoin xs ys
 
+-- | Keep the shortest itineraries of each destination.
+keep :: (MetricSpace e) => Int -> PortsCoverage e -> PortsCoverage e
+keep n = fmap $ join . map shortest . groupBy ((==) `on` iDest) . sortBy (compare `on` iDest)
+  where shortest = take n . sortBy (compare `on` sum . map sDist . iSteps)
+
 -- | Direct ports coverage from adjacency list.
 directCoverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e
 directCoverage adj = M.group $ do
@@ -102,9 +108,9 @@ directCoverage adj = M.group $ do
   Edge portA _ elemB distAB <- adjs
   return (portA, Itinerary [] portB [Step distAB elemB])
 
--- | List of all coverages in path length order.
-coverages :: (MetricSpace e) => PortsAdjacency e -> [PortsCoverage e]
-coverages adj = iterate (extendedCoverage adj) (directCoverage adj)
+-- | List of all shortest coverages in path length order.
+coverages :: (MetricSpace e) => Int -> PortsAdjacency e -> [PortsCoverage e]
+coverages n adj = iterate (keep n . extendedCoverage adj) (directCoverage adj)
 
 -- | List of paths from coverage.
 coveragePaths :: (MetricSpace e) => PortsCoverage e -> [Path]
@@ -154,7 +160,7 @@ test :: IO ()
 test = do
   ports <- loadPorts "ports.csv"
   let adj = adjacency ports $ map (join (***) (fromJust . toPort)) onds
-      cov = take 3 $ coverages adj
+      cov = take 3 $ coverages 10 adj
   mapM_ (putStrLn . show) cov
   where onds = [("NCE", "CDG")
                ,("CDG", "FRA")

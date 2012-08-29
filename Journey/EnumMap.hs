@@ -1,3 +1,5 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 module EnumMap (
       EnumMap
     , fromList
@@ -9,9 +11,14 @@ module EnumMap (
     ) where
 
 import qualified Data.IntMap as M
+import Data.Foldable (Foldable)
+import Data.Traversable (Traversable)
 
 -- | A sorted collection of associations.
-newtype EnumMap e a = MkEnumMap (M.IntMap a)
+newtype EnumMap e a = MkEnumMap (M.IntMap a) deriving ( Functor
+                                                      , Foldable
+                                                      , Traversable
+                                                      )
 
 instance (Enum e, Show e, Show a) => Show (EnumMap e a) where
   show = show . toList
