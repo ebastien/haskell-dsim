@@ -202,7 +202,7 @@ timeVariationP = (plus <|> minus) <*> time
 dateVariationP :: Parser DateVariation
 dateVariationP = secondsToDiffTime . (*86400) . fromIntegral
                  <$> (before <|> after)
-  where before = pure (-1) <* P.char 'A'
+  where before = pure (-1) <* P.char 'J'
         after  = subtract (ord '0') . ord <$> P.digit
 
 -- | Parser for schedule times.

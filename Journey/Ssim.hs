@@ -177,5 +177,5 @@ readSsimFile :: String -> IO Ssim
 readSsimFile s = do
   result <- LP.parse ssimP <$> LB.readFile s
   case result of
-    LP.Fail _ ctx msg -> fail . unlines $ msg:ctx
-    LP.Done _ ssim    -> return ssim
+    LP.Fail rem ctx msg -> fail . unlines $ msg:(show $ LB.length rem):ctx
+    LP.Done _ ssim      -> return ssim
