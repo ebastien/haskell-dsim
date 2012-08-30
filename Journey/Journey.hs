@@ -8,12 +8,13 @@ module Journey (
     , coveragePaths
     ) where
     
-import Control.Monad (guard, join)
-import Data.Maybe (fromJust)
+import Control.Monad (guard, join, foldM)
+import Data.Maybe (fromJust, isJust)
 import Control.Arrow ((***))
 import Data.List (groupBy, sortBy)
 import Data.Function (on)
 import Data.Traversable (traverse)
+import Data.Monoid (Monoid, mempty, mappend)
 
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -42,12 +43,15 @@ type Distance = Double
   Graph of ports
 -}
 
--- | A coverage by origin port.
-type PortsCoverage e = PortMap [Itinerary e]
+-- | Alternative itineraries by destination port.
+type Alternatives e = PortMap [Itinerary e]
+
+-- | Coverages by origin port.
+type PortsCoverage e = PortMap (Alternatives e)
 
 -- | An itinerary.
-data Itinerary e = Itinerary { iPath  :: Path     -- via ports
-                             , iDest  :: Port     -- final destination
+data Itinerary e = Itinerary { iDist  :: Distance -- total indirect distance
+                             , iPath  :: Path     -- via ports
                              , iSteps :: [Step e] -- list of steps
                              } deriving (Show)
 
@@ -67,26 +71,38 @@ data Edge e = Edge
     Distance  -- distance between origin and destination
     deriving (Show)
 
--- | Predicate for competitive itinerary according to direct vs. indirect distances.
-isCompetitive :: (MetricSpace e) => e -> Distance -> [Step e] -> Bool
-isCompetitive elem0 dist0 steps = all competitive itineraries
-  where competitive (indirect, direct) = indirect < ratio * direct
-        ratio = 1.5
-        itineraries = scanl compose (dist0, dist0) steps
-        compose (indirect, _) (Step distN elemN) = (indirect', direct)
-          where indirect' = indirect + distN
-                direct = distance elem0 elemN
+-- | Competitive distance according to direct vs. indirect distances.
+competitiveDistance :: (MetricSpace e) => e -> Distance -> [Step e] -> Maybe Distance
+competitiveDistance elemA distAB steps = fmap fst $ foldM detour (distAB, distAB) steps
+  where detour (indirectAN, _) (Step distNM elemM)
+          | indirectAM < ratio * directAM = Just (indirectAM, directAM)
+          | otherwise                     = Nothing
+          where directAM = distance elemA elemM
+                indirectAM = indirectAN + distNM
+                ratio = 1.5
 
 -- | Extend the coverage by one more step.
-extendedCoverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e -> PortsCoverage e
-extendedCoverage adj cov = M.group $ do
-  (portB, itis, adjs) <- zjoin (M.toList cov) (M.toList adj)
-  Edge portA elemA elemB distAB <- adjs
-  Itinerary path dest steps <- itis
-  guard $ isCompetitive elemA distAB steps
-  let path' = portB : path
-      steps' = (Step distAB elemB) : steps
-  return (portA, Itinerary path' dest steps')
+extendedCoverage :: (MetricSpace e) => Int
+                                    -> PortsAdjacency e
+                                    -> PortsCoverage e
+                                    -> PortsCoverage e
+extendedCoverage n adj cov = groupByOrigin $ do
+    (portB, alts, adjs) <- zjoin (M.toList cov) (M.toList adj)
+    Edge portA elemA elemB distAB <- adjs
+    (dest, itis) <- M.toList alts
+    Itinerary _ path steps <- itis
+    let distT = competitiveDistance elemA distAB steps
+    guard $ isJust distT
+    let path' = portB : path
+        steps' = (Step distAB elemB) : steps
+    return (portA, (dest, Itinerary (fromJust distT) path' steps'))
+  where groupByOrigin = fmap groupByDestination . M.group
+        groupByDestination = fmap filterByDistance . M.group
+        filterByDistance = takeWhile shortEnough . sortBy (compare `on` iDist)
+        shortEnough (Itinerary d _ _) =  d * ratio < shortest
+        ratio = 1.5
+        shortest = undefined
+        
 
 -- | Join two lists of pairs sorted by the first element.
 zjoin :: (Ord a) => [(a,b)] -> [(a,c)] -> [(a,b,c)]
@@ -96,26 +112,22 @@ zjoin x@((xa,xb):xs) y@((ya,yb):ys) | xa > ya   = zjoin x ys
                                     | xa < ya   = zjoin xs y
                                     | otherwise = (xa,xb,yb) : zjoin xs ys
 
--- | Keep the shortest itineraries of each destination.
-keep :: (MetricSpace e) => Int -> PortsCoverage e -> PortsCoverage e
-keep n = fmap $ join . map shortest . groupBy ((==) `on` iDest) . sortBy (compare `on` iDest)
-  where shortest = take n . sortBy (compare `on` sum . map sDist . iSteps)
-
 -- | Direct ports coverage from adjacency list.
 directCoverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e
-directCoverage adj = M.group $ do
+directCoverage adj = fmap M.group . M.group $ do
   (portB, adjs) <- M.toList adj
   Edge portA _ elemB distAB <- adjs
-  return (portA, Itinerary [] portB [Step distAB elemB])
+  return (portA, (portB, Itinerary distAB [] [Step distAB elemB]))
 
 -- | List of all shortest coverages in path length order.
 coverages :: (MetricSpace e) => Int -> PortsAdjacency e -> [PortsCoverage e]
-coverages n adj = iterate (keep n . extendedCoverage adj) (directCoverage adj)
+coverages n adj = iterate (extendedCoverage n adj) (directCoverage adj)
 
 -- | List of paths from coverage.
 coveragePaths :: (MetricSpace e) => PortsCoverage e -> [Path]
-coveragePaths cov = [ org : path ++ [dst] | (org, i) <- M.toList cov,
-                                            Itinerary path dst _ <- i ]
+coveragePaths cov = [ org : path ++ [dst] | (org, alts) <- M.toList cov,
+                                            (dst, itis) <- M.toList alts,
+                                             Itinerary _ path _ <- itis ]
 
 {-
   Geographic coordinates space

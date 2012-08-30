@@ -19,6 +19,6 @@ main = do
   onds <- ssimOnDs <$> readSsimFile ssimFile
   printf "%d OnDs loaded from SSIM file\n" $ length onds :: IO ()
   let adj = adjacency ports onds
-      covs = take 8 $ coverages 10 adj
+      covs = take 8 $ coverages 1 adj
   mapM_ (printf "%d paths found\n" . length . coveragePaths) covs
   print . coveragePaths $ last covs
