@@ -98,8 +98,8 @@ extendedCoverage adj covs@(cov:_) = flip (:) covs $ groupOrg $ do
         groupDst org = M.filter (not . null)
                      . M.mapWithKey (filterDist $ map (M.find org) covs)
                      . M.group
-        filterDist alts dst = takeWhile short . sortBy (compare `on` iDist)
-          where short (Itinerary d _ _) = case alternatives of
+        filterDist alts dst = filter isShort
+          where isShort (Itinerary d _ _) = case alternatives of
                     [] -> True
                     xs -> d <= (minimum $ map (iDist . head) xs) * ratio
                 alternatives = mapMaybe (M.lookup dst) alts
