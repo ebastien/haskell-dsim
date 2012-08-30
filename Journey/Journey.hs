@@ -8,13 +8,12 @@ module Journey (
     , coveragePaths
     ) where
     
-import Control.Monad (guard, join, foldM)
-import Data.Maybe (fromJust, isJust)
+import Control.Monad (guard, join, foldM, mzero)
+import Data.Maybe (fromJust, isJust, mapMaybe)
 import Control.Arrow ((***))
 import Data.List (groupBy, sortBy)
 import Data.Function (on)
 import Data.Traversable (traverse)
-import Data.Monoid (Monoid, mempty, mappend)
 
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -82,27 +81,29 @@ competitiveDistance elemA distAB steps = fmap fst $ foldM detour (distAB, distAB
                 ratio = 1.5
 
 -- | Extend the coverage by one more step.
-extendedCoverage :: (MetricSpace e) => Int
-                                    -> PortsAdjacency e
-                                    -> PortsCoverage e
-                                    -> PortsCoverage e
-extendedCoverage n adj cov = groupByOrigin $ do
+extendedCoverage :: (MetricSpace e) => PortsAdjacency e
+                                    -> [PortsCoverage e]
+                                    -> [PortsCoverage e]
+extendedCoverage adj covs@(cov:_) = flip (:) covs $ groupOrg $ do
     (portB, alts, adjs) <- zjoin (M.toList cov) (M.toList adj)
     Edge portA elemA elemB distAB <- adjs
     (dest, itis) <- M.toList alts
     Itinerary _ path steps <- itis
-    let distT = competitiveDistance elemA distAB steps
-    guard $ isJust distT
-    let path' = portB : path
-        steps' = (Step distAB elemB) : steps
-    return (portA, (dest, Itinerary (fromJust distT) path' steps'))
-  where groupByOrigin = fmap groupByDestination . M.group
-        groupByDestination = fmap filterByDistance . M.group
-        filterByDistance = takeWhile shortEnough . sortBy (compare `on` iDist)
-        shortEnough (Itinerary d _ _) =  d * ratio < shortest
-        ratio = 1.5
-        shortest = undefined
-        
+    case competitiveDistance elemA distAB steps of
+      Nothing    -> mzero
+      Just distT -> return (portA, (dest, Itinerary distT path' steps'))
+        where path' = portB : path
+              steps' = (Step distAB elemB) : steps
+  where groupOrg = M.mapWithKey groupDst . M.group
+        groupDst org = M.filter (not . null)
+                     . M.mapWithKey (filterDist $ map (M.find org) covs)
+                     . M.group
+        filterDist alts dst = takeWhile short . sortBy (compare `on` iDist)
+          where short (Itinerary d _ _) = case alternatives of
+                    [] -> True
+                    xs -> d <= (minimum $ map (iDist . head) xs) * ratio
+                alternatives = mapMaybe (M.lookup dst) alts
+                ratio = 1.1
 
 -- | Join two lists of pairs sorted by the first element.
 zjoin :: (Ord a) => [(a,b)] -> [(a,c)] -> [(a,b,c)]
@@ -120,8 +121,8 @@ directCoverage adj = fmap M.group . M.group $ do
   return (portA, (portB, Itinerary distAB [] [Step distAB elemB]))
 
 -- | List of all shortest coverages in path length order.
-coverages :: (MetricSpace e) => Int -> PortsAdjacency e -> [PortsCoverage e]
-coverages n adj = iterate (extendedCoverage n adj) (directCoverage adj)
+coverages :: (MetricSpace e) => PortsAdjacency e -> [PortsCoverage e]
+coverages adj = map head $ iterate (extendedCoverage adj) [directCoverage adj]
 
 -- | List of paths from coverage.
 coveragePaths :: (MetricSpace e) => PortsCoverage e -> [Path]
@@ -165,14 +166,14 @@ adjacency :: PortsInfo -> [OnD] -> PortsAdjacency GeoCoord
 adjacency ports = M.group . map edge
   where edge (org, dst) = (dst, Edge org coord_org coord_dst dist)
           where dist = distance coord_org coord_dst
-                coord_org = M.find ports org
-                coord_dst = M.find ports dst
+                coord_org = M.find org ports
+                coord_dst = M.find dst ports
 
 test :: IO ()
 test = do
   ports <- loadPorts "ports.csv"
   let adj = adjacency ports $ map (join (***) (fromJust . toPort)) onds
-      cov = take 3 $ coverages 10 adj
+      cov = take 3 $ coverages adj
   mapM_ (putStrLn . show) cov
   where onds = [("NCE", "CDG")
                ,("CDG", "FRA")

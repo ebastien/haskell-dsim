@@ -6,9 +6,14 @@ module EnumMap (
     , toList
     , group
     , find
+    , lookup
     , keys
     , size
+    , mapWithKey
+    , filter
     ) where
+
+import Prelude hiding (lookup, filter)
 
 import qualified Data.IntMap as M
 import Data.Foldable (Foldable)
@@ -38,9 +43,13 @@ toList :: (Enum e) => EnumMap e a -> [(e, a)]
 toList (MkEnumMap m) = map assoc $ M.assocs m
   where assoc (e, v) = (toEnum e, v)
 
--- | Find the element by key.
-find :: (Enum e) => EnumMap e a -> e -> a
-find (MkEnumMap m) e = m M.! (fromEnum e)
+-- | Find an element by key.
+find :: (Enum e) => e -> EnumMap e a -> a
+find e (MkEnumMap m) = m M.! (fromEnum e)
+
+-- | Lookup an element by key.
+lookup :: (Enum e) => e -> EnumMap e a -> Maybe a
+lookup e (MkEnumMap m) = M.lookup (fromEnum e) m
 
 -- | List of keys.
 keys :: (Enum e) => EnumMap e a -> [e]
@@ -50,3 +59,10 @@ keys (MkEnumMap m) = map toEnum $ M.keys m
 size :: EnumMap e a -> Int
 size (MkEnumMap m) = M.size m
 
+-- | Map a function over all values with the key as extra input.
+mapWithKey :: (Enum e) => (e -> a -> b) -> EnumMap e a -> EnumMap e b
+mapWithKey f (MkEnumMap m) = MkEnumMap $ M.mapWithKey f' m
+  where f' k = f $ toEnum k
+
+filter :: (a -> Bool) -> EnumMap e a -> EnumMap e a
+filter f (MkEnumMap m) = MkEnumMap $ M.filter f m
