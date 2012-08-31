@@ -42,11 +42,8 @@ type Distance = Double
   Graph of ports
 -}
 
--- | Alternative itineraries by destination port.
-type Alternatives e = PortMap [Itinerary e]
-
 -- | Coverages by origin port.
-type PortsCoverage e = PortMap (Alternatives e)
+type PortCoverages e = PortMap (PortMap [Itinerary e])
 
 -- | An itinerary.
 data Itinerary e = Itinerary { iDist  :: Distance -- total indirect distance
@@ -60,7 +57,7 @@ data Step e = Step { sDist :: Distance -- distance
                    } deriving (Show)
 
 -- | A graph of ports organized as adjacency by destination.
-type PortsAdjacency e = PortMap [Edge e]
+type PortAdjacencies e = PortMap [Edge e]
 
 -- | An edge of the graph of ports.
 data Edge e = Edge
@@ -81,9 +78,9 @@ competitiveDistance elemA distAB steps = fmap fst $ foldM detour (distAB, distAB
                 ratio = 1.5
 
 -- | Extend the coverage by one more step.
-extendedCoverage :: (MetricSpace e) => PortsAdjacency e
-                                    -> [PortsCoverage e]
-                                    -> [PortsCoverage e]
+extendedCoverage :: (MetricSpace e) => PortAdjacencies e
+                                    -> [PortCoverages e]
+                                    -> [PortCoverages e]
 extendedCoverage adj covs@(cov:_) = flip (:) covs $ groupOrg $ do
     (portB, alts, adjs) <- zjoin (M.toList cov) (M.toList adj)
     Edge portA elemA elemB distAB <- adjs
@@ -114,18 +111,18 @@ zjoin x@((xa,xb):xs) y@((ya,yb):ys) | xa > ya   = zjoin x ys
                                     | otherwise = (xa,xb,yb) : zjoin xs ys
 
 -- | Direct ports coverage from adjacency list.
-directCoverage :: (MetricSpace e) => PortsAdjacency e -> PortsCoverage e
+directCoverage :: (MetricSpace e) => PortAdjacencies e -> PortCoverages e
 directCoverage adj = fmap M.group . M.group $ do
   (portB, adjs) <- M.toList adj
   Edge portA _ elemB distAB <- adjs
   return (portA, (portB, Itinerary distAB [] [Step distAB elemB]))
 
 -- | List of all shortest coverages in path length order.
-coverages :: (MetricSpace e) => PortsAdjacency e -> [PortsCoverage e]
+coverages :: (MetricSpace e) => PortAdjacencies e -> [PortCoverages e]
 coverages adj = map head $ iterate (extendedCoverage adj) [directCoverage adj]
 
 -- | List of paths from coverage.
-coveragePaths :: (MetricSpace e) => PortsCoverage e -> [Path]
+coveragePaths :: (MetricSpace e) => PortCoverages e -> [Path]
 coveragePaths cov = [ org : path ++ [dst] | (org, alts) <- M.toList cov,
                                             (dst, itis) <- M.toList alts,
                                              Itinerary _ path _ <- itis ]
@@ -162,7 +159,7 @@ loadPorts f = return . M.fromList . map parse . drop 1 . T.lines =<< T.readFile 
                 col = V.fromList $ T.split (=='^') row
 
 -- | Ports adjacency in geographic coordinates.
-adjacency :: PortsInfo -> [OnD] -> PortsAdjacency GeoCoord
+adjacency :: PortsInfo -> [OnD] -> PortAdjacencies GeoCoord
 adjacency ports = M.group . map edge
   where edge (org, dst) = (dst, Edge org coord_org coord_dst dist)
           where dist = distance coord_org coord_dst
