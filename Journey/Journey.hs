@@ -11,7 +11,7 @@ module Journey (
 import Control.Monad (guard, join, foldM, mzero)
 import Data.Maybe (fromJust, isJust, mapMaybe)
 import Control.Arrow ((***))
-import Data.List (groupBy, sortBy)
+import Data.List (groupBy, sortBy, sort, group)
 import Data.Function (on)
 import Data.Traversable (traverse)
 
@@ -145,26 +145,39 @@ orthodromicDistance (GeoCoord (latA, lonA)) (GeoCoord (latB, lonB)) = dist
 instance MetricSpace GeoCoord where
   distance = orthodromicDistance
 
--- | Geographic coordinates of ports.
-type PortsInfo = PortMap GeoCoord
+-- | Make geographic coordinates from a pair of latitude and longitude.
+fromDegree :: (Double, Double) -> GeoCoord
+fromDegree (lat, lon) = GeoCoord (radian lat, radian lon)
+  where radian d = d * pi / 180.0
+
+-- | Geographic reference data.
+data Reference = Reference { rCoord :: GeoCoord
+                           , rCity  :: Port
+                           } deriving (Show)
+
+-- | Port references.
+type PortReferences = PortMap Reference
 
 -- | Load ports information from a file.
-loadPorts :: String -> IO PortsInfo
+loadPorts :: String -> IO PortReferences
 loadPorts f = return . M.fromList . map parse . drop 1 . T.lines =<< T.readFile f
-  where radian d = d * pi / 180.0
-        parse row = (port, GeoCoord (radian lat, radian lon))
-          where port = fromJust . toPort . T.encodeUtf8 $ col V.! 0
+  where parse row = (port, reference)
+          where col = V.fromList $ T.split (=='^') row
+                port = fromJust . toPort . T.encodeUtf8 $ col V.! 0
                 lat = read . T.unpack $ col V.! 7
                 lon = read . T.unpack $ col V.! 8
-                col = V.fromList $ T.split (=='^') row
+                city = fromJust . toPort . T.encodeUtf8 $ col V.! 31
+                reference = Reference (fromDegree (lat, lon)) city
 
 -- | Ports adjacency in geographic coordinates.
-adjacency :: PortsInfo -> [OnD] -> PortAdjacencies GeoCoord
-adjacency ports = M.group . map edge
-  where edge (org, dst) = (dst, Edge org coord_org coord_dst dist)
+adjacency :: PortReferences -> [OnD] -> PortAdjacencies GeoCoord
+adjacency ports = M.group . map edge . group . sort . filter valid . map cities
+  where cities = join (***) (rCity . (flip M.find) ports)
+        valid (org, dst) = org /= dst
+        edge ((org, dst):_) = (dst, Edge org coord_org coord_dst dist)
           where dist = distance coord_org coord_dst
-                coord_org = M.find org ports
-                coord_dst = M.find dst ports
+                coord_org = rCoord $ M.find org ports
+                coord_dst = rCoord $ M.find dst ports
 
 test :: IO ()
 test = do
