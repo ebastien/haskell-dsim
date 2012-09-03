@@ -15,10 +15,14 @@ import Data.Functor ((<$>))
 import Control.Monad (void, join)
 import Control.Applicative (pure, some, (<*>), (<*), (*>))
 
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 
 import Data.List (sort, group, groupBy)
 import Data.Function (on)
+
+import Data.Time.Calendar (Day)
+
+import qualified EnumMap as M
 
 import Types
 
@@ -45,11 +49,13 @@ data LegPeriod = LegPeriod { lpFlight :: Flight
                            , lpElapsedTime :: !TimeDuration
                            } deriving Show
 
+type SegmentDEI = Int
+
 data SegmentData = SegmentData { sdFlight :: Flight
                                , sdIndex :: !Int
                                , sdBoard :: !Port
                                , sdOff :: !Port
-                               , sdDEI :: !Int
+                               , sdDEI :: !SegmentDEI
                                } deriving Show
 
 data LegGroup = LegGroup { lgLeg :: LegPeriod
@@ -159,10 +165,83 @@ ssimP :: Parser Ssim
 ssimP = Ssim <$> (headerP            <?> "SSIM7 header")
              <*> (some carrierGroupP <?> "SSIM7 carriers")
 
+{-------------------------------------------------------------------------------
+  Segments browsing
+-------------------------------------------------------------------------------}
+
+data POnD = MkPOnD {- #UNPACK# -} !Port
+                   {- #UNPACK# -} !Port
+                   deriving (Show)
+
+instance Enum POnD where
+  fromEnum (MkPOnD a b) = (fromEnum a) * 26^3 + (fromEnum b)
+  toEnum i = let (a,b) = divMod i (26^3) in MkPOnD (toEnum a) (toEnum b)
+
+-- | A collection of OnD associations.
+type OnDMap a = M.EnumMap POnD a
+
+type Segment = [(LegPeriod, [SegmentDEI])]
+
+type OnDSegments = OnDMap [Segment]
+
+-- | Segment index from board and off legs
+segmentIdx :: LegPeriod -> LegPeriod -> Int
+segmentIdx a b = (lpSequence b) * 26 + (lpSequence a) - 1
+
+-- | Extract segments from a flight
+flightSegments :: FlightGroup -> [(POnD, Segment)]
+flightSegments = join . combine
+  where combine []         = []
+        combine xs@(x:xs') = [ mkAssoc y | y <- xs ] : combine xs'
+          where legX = lgLeg x
+                mkAssoc y = (MkPOnD (lpBoard legX) (lpOff legY), map select legs)
+                  where legY = lgLeg y
+                        legs = takeWhile (on (<) (lpSequence . lgLeg) $ y) xs ++ [y]
+                        select l = (legL, map sdDEI . filter ((==) idx . sdIndex) $ lgSegments l)
+                          where legL = lgLeg l
+                                idx = segmentIdx legL legY
+
+-- | Extract segments from a SSIM structure.
+ssimSegments :: Ssim -> OnDSegments
+ssimSegments ssim = M.group $ do
+  car <- ssimCarriers ssim
+  flt <- cgFlights car
+  flightSegments flt
+
+composePath :: OnDSegments -> Path -> [[Segment]]
+composePath onds = walk [id]
+  where walk done (b:[])   = map ($[]) done
+        walk done (a:b:ps) = walk done' (b:ps)
+          where done' = [ d . (c:) | c <- choices, d <- done ]
+                choices = M.find (MkPOnD a b) onds
+
+data SegmentDate = SegmentDate { sFlight :: Flight
+                               , sDate :: !Day
+                               , sBoard :: !Port
+                               , sOff :: !Port
+                               , sDepartureTime :: !ScheduleTime
+                               , sArrivalTime :: !ScheduleTime
+                               , sElapsedTime :: !TimeDuration
+                               } deriving Show
+
+fromSegment :: Day -> Segment -> Maybe SegmentDate
+fromSegment d s = undefined
+
+connections :: Day -> OnDSegments -> Path -> [[SegmentDate]]
+connections d0 segs p = mapMaybe alternative $ composePath segs p
+  where alternative xs = case fromSegment d0 (head xs) of
+                           Just first -> walk d0 (first:) xs
+                           Nothing    -> Nothing
+        walk _ done (b:[])   = Just $ done []
+        walk d done (a:b:xs) = case connect d a b of
+                                 Just (next, d') -> walk d' (done . (next:)) (b:xs)
+                                 Nothing         -> Nothing
+        connect d a b = undefined
+
 -- | Extract OnDs from a flight.
 flightOnDs :: FlightGroup -> [OnD]
 flightOnDs = join . combine . map lgLeg
-  where combine as@(x:xs) = [ (lpBoard x, lpOff y) | y <- as ] : combine xs
+  where combine xs@(x:xs') = [ (lpBoard x, lpOff y) | y <- xs ] : combine xs'
         combine []        = []
 
 -- | Extract unique OnDs from a SSIM structure.
