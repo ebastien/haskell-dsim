@@ -14,13 +14,13 @@ import qualified Data.Attoparsec.ByteString.Lazy as LP
 import Data.Functor ((<$>))
 import Control.Monad (void, join)
 import Control.Applicative (pure, some, (<*>), (<*), (*>))
-
+import Data.Monoid (mconcat, First(..), getFirst)
 import Data.Maybe (fromMaybe, mapMaybe)
-
 import Data.List (sort, group, groupBy)
 import Data.Function (on)
 
-import Data.Time.Calendar (Day)
+import Data.Time.Calendar (Day, diffDays)
+import Data.Time.Clock (secondsToDiffTime)
 
 import qualified EnumMap as M
 
@@ -208,6 +208,7 @@ ssimSegments ssim = M.group $ do
   flt <- cgFlights car
   flightSegments flt
 
+-- | Compose the matching segment for a path.
 composePath :: OnDSegments -> Path -> [[Segment]]
 composePath onds = walk [id]
   where walk done (b:[])   = map ($[]) done
@@ -224,19 +225,33 @@ data SegmentDate = SegmentDate { sFlight :: Flight
                                , sElapsedTime :: !TimeDuration
                                } deriving Show
 
-fromSegment :: Day -> Segment -> Maybe SegmentDate
-fromSegment d s = undefined
+-- | Look for a matching date in a period.
+lookupDate :: Segment -> Day -> Maybe SegmentDate
+lookupDate s d = undefined
 
-connections :: Day -> OnDSegments -> Path -> [[SegmentDate]]
-connections d0 segs p = mapMaybe alternative $ composePath segs p
-  where alternative xs = case fromSegment d0 (head xs) of
-                           Just first -> walk d0 (first:) xs
-                           Nothing    -> Nothing
-        walk _ done (b:[])   = Just $ done []
-        walk d done (a:b:xs) = case connect d a b of
-                                 Just (next, d') -> walk d' (done . (next:)) (b:xs)
-                                 Nothing         -> Nothing
-        connect d a b = undefined
+-- | Feasible connections on a given day.
+connections :: Day -> [[Segment]] -> [[SegmentDate]]
+connections d0 = mapMaybe $ connection d0
+
+-- | Feasible connection on a given day.
+connection :: Day -> [Segment] -> Maybe [SegmentDate]
+connection d0 xs = case lookupDate (head xs) d0 of
+                     Just s0 -> walk d0 (s0:) xs
+                     Nothing -> Nothing
+  where walk _ trip (_:[])   = Just $ trip []
+        walk d trip (a:b:xs) = case connect d a b of
+                                 Just s  -> walk (sDate s) (trip . (s:)) (b:xs)
+                                 Nothing -> Nothing
+
+-- | Connect an inbound segment with an outbound segment
+connect :: Day -> Segment -> Segment -> Maybe SegmentDate
+connect d a b = getFirst . mconcat $ map (First . lookupDate b) days
+  where days = takeWhile shortEnough $ dropWhile tooShort [d..]
+        shortEnough d' = wait d' < secondsToDiffTime 6*60*60
+        tooShort d' = wait d' < secondsToDiffTime 30*60
+        wait d' = depB - arrA + secondsToDiffTime (diffDays d d' * 86400)
+        arrA = lpArrivalTime . fst $ last a
+        depB = lpDepartureTime . fst $ head b
 
 -- | Extract OnDs from a flight.
 flightOnDs :: FlightGroup -> [OnD]
