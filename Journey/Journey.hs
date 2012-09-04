@@ -1,11 +1,15 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Journey (
-      test
-    , loadPorts
-    , adjacency
+      PortMap
+    , Distance
+    , MetricSpace
+    , distance
+    , Edge(..)
+    , PortAdjacencies
+    , PortCoverages
     , coverages
-    , coveragePaths
+    , coveredPaths
+    , coveredOnDs
+    , ondPaths
     ) where
     
 import Control.Monad (guard, join, foldM, mzero)
@@ -19,9 +23,9 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
+import qualified EnumMap as M
 
 import Types
-import qualified EnumMap as M
 
 -- | A sorted collection of port associations.
 type PortMap a = M.EnumMap Port a
@@ -121,71 +125,19 @@ directCoverage adj = fmap M.group . M.group $ do
 coverages :: (MetricSpace e) => PortAdjacencies e -> [PortCoverages e]
 coverages adj = map head $ iterate (extendedCoverage adj) [directCoverage adj]
 
--- | List of paths from coverage.
-coveragePaths :: (MetricSpace e) => PortCoverages e -> [Path]
-coveragePaths cov = [ org : path ++ [dst] | (org, alts) <- M.toList cov,
-                                            (dst, itis) <- M.toList alts,
-                                             Itinerary _ path _ <- itis ]
+-- | List of all paths from a coverage.
+coveredPaths :: (MetricSpace e) => PortCoverages e -> [Path]
+coveredPaths cov = [ org : path ++ [dst] | (org, alts) <- M.toList cov,
+                                           (dst, itis) <- M.toList alts,
+                                           Itinerary _ path _ <- itis ]
 
-{-
-  Geographic coordinates space
--}
+-- | List of all covered OnDs.
+coveredOnDs :: (MetricSpace e) => PortCoverages e -> [OnD]
+coveredOnDs cov = [ (org, dst) | (org, alts) <- M.toList cov, dst <- M.keys alts]
 
-newtype GeoCoord = GeoCoord (Double, Double) deriving (Show)
-
--- | The orthodromic distance between two geographic coordinates.
-orthodromicDistance :: GeoCoord -> GeoCoord -> Distance
-orthodromicDistance (GeoCoord (latA, lonA)) (GeoCoord (latB, lonB)) = dist
-  where dist = 2.0 * radius * (asin . sqrt $ sin2_dLat + cos2_lat * sin2_dLon)
-        sin2_dLat = (^(2::Int)) . sin $ (latB - latA) / 2.0
-        sin2_dLon = (^(2::Int)) . sin $ (lonB - lonA) / 2.0
-        cos2_lat = cos latA * cos latB
-        radius = 6367.0
-
-instance MetricSpace GeoCoord where
-  distance = orthodromicDistance
-
--- | Make geographic coordinates from a pair of latitude and longitude.
-fromDegree :: (Double, Double) -> GeoCoord
-fromDegree (lat, lon) = GeoCoord (radian lat, radian lon)
-  where radian d = d * pi / 180.0
-
--- | Geographic reference data.
-data Reference = Reference { rCoord :: GeoCoord
-                           , rCity  :: Port
-                           } deriving (Show)
-
--- | Port references.
-type PortReferences = PortMap Reference
-
--- | Load ports information from a file.
-loadPorts :: String -> IO PortReferences
-loadPorts f = return . M.fromList . map parse . drop 1 . T.lines =<< T.readFile f
-  where parse row = (port, reference)
-          where col = V.fromList $ T.split (=='^') row
-                port = fromJust . toPort . T.encodeUtf8 $ col V.! 0
-                lat = read . T.unpack $ col V.! 7
-                lon = read . T.unpack $ col V.! 8
-                city = fromJust . toPort . T.encodeUtf8 $ col V.! 31
-                reference = Reference (fromDegree (lat, lon)) city
-
--- | Ports adjacency in geographic coordinates.
-adjacency :: PortReferences -> [OnD] -> PortAdjacencies GeoCoord
-adjacency ports = M.group . map edge . group . sort . filter valid . map cities
-  where cities = join (***) (rCity . (flip M.find) ports)
-        valid (org, dst) = org /= dst
-        edge ((org, dst):_) = (dst, Edge org coord_org coord_dst dist)
-          where dist = distance coord_org coord_dst
-                coord_org = rCoord $ M.find org ports
-                coord_dst = rCoord $ M.find dst ports
-
-test :: IO ()
-test = do
-  ports <- loadPorts "ports.csv"
-  let adj = adjacency ports $ map (join (***) (fromJust . toPort)) onds
-      cov = take 3 $ coverages adj
-  mapM_ (putStrLn . show) cov
-  where onds = [("NCE", "CDG")
-               ,("CDG", "FRA")
-               ,("FRA", "JFK")
-               ,("CDG", "JFK")] 
+-- | List of paths for an origin and a destination.
+ondPaths :: (MetricSpace e) => OnD -> PortCoverages e -> Maybe [Path]
+ondPaths (a,b) cov = case M.lookup b . M.find a $ cov of
+                       Just itis -> Just $ [ a : path ++ [b]
+                                           | Itinerary _ path _ <- itis ]
+                       Nothing   -> Nothing

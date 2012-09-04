@@ -4,8 +4,6 @@
 module Types (
       paddedDecimalP
     , decimalP
-    , Dow
-    , dowP
     , AirlineCode
     , airlineP
     , toAirlineCode
@@ -15,7 +13,13 @@ module Types (
     , OnD
     , Path
     , PeriodBoundary
+    , dateP
+    , toDate
     , periodBoundaryP
+    , Dow
+    , dowP
+    , Period
+    , withinPeriod
     , TimeDuration
     , TimeVariation
     , timeVariationP
@@ -25,6 +29,7 @@ module Types (
     , scheduleTimeP
     , fnumP
     , pointsIndicatorP
+    , segmentIdx
     ) where
 
 import qualified Data.ByteString.Char8 as B8
@@ -38,6 +43,7 @@ import Data.Char (chr, ord)
 import Data.Time.Clock (DiffTime, secondsToDiffTime)
 import Data.Time.Calendar (Day, fromGregorianValid)
 import Data.Time.LocalTime (makeTimeOfDayValid, timeOfDayToTime)
+import Data.Time.Calendar.WeekDate (toWeekDate)
 
 import Data.List (elemIndex)
 import Data.Maybe (fromMaybe)
@@ -71,23 +77,6 @@ packWith n f | n > 0     = sum <$> (sequence $ map f [0..n-1])
 -- | ByteString parsing to Maybe.
 maybeParse :: Parser a -> B8.ByteString -> Maybe a
 maybeParse p = either (const Nothing) Just . P.parseOnly p
-
-{-------------------------------------------------------------------------------
-  Days of the week
--------------------------------------------------------------------------------}
-
-newtype Dow = MkDow Word8
-
-instance Show Dow where
-  show (MkDow w) = map (step w) [0..6]
-    where step w' n | testBit w' n = chr (n + ord '1')
-                    | otherwise       = ' '
-
--- | Parser for days of week.
-dowP :: Parser Dow
-dowP = MkDow <$> packWith 7 step <?>  "Days of week"
-  where step n = P.char (chr $ ord '1' + n) *> (pure $ bit n)
-             <|> P.char ' ' *> (pure 0)
 
 {-------------------------------------------------------------------------------
   Airline code
@@ -147,11 +136,38 @@ type OnD = (Port, Port)
 -- | A sequence of ports.
 type Path = [Port]
 
-{-
+{-------------------------------------------------------------------------------
+  Days of the week
+-------------------------------------------------------------------------------}
+
+newtype Dow = MkDow Word8
+
+instance Show Dow where
+  show (MkDow w) = map step [0..6]
+    where step n | testBit w n = chr (n + ord '1')
+                 | otherwise   = ' '
+
+-- | Parser for days of week.
+dowP :: Parser Dow
+dowP = MkDow <$> packWith 7 step <?>  "Days of week"
+  where step n = P.char (chr $ ord '1' + n) *> (pure $ bit n)
+             <|> P.char ' ' *> (pure 0)
+
+-- | Try to convert a ByteString to days of the week.
+toDow :: B8.ByteString -> Maybe Dow
+toDow = maybeParse dowP
+
+-- | Lookup a single day of week.
+lookupDow :: Int -> Dow -> Bool
+lookupDow n (MkDow w) = testBit w (n-1)
+
+{-------------------------------------------------------------------------------
   Period
--}
+-------------------------------------------------------------------------------}
 
 type PeriodBoundary = Maybe Day
+
+type Period = (Day, PeriodBoundary, Dow)
 
 -- | Parser for days.
 dayP :: Parser Int
@@ -169,6 +185,17 @@ monthP = do
 yearP :: Num a => Parser a
 yearP = (fromIntegral . (2000+)) <$> decimalP 2
 
+-- | Parse for dates.
+dateP :: Parser Day
+dateP = do
+  d <- dayP; m <- monthP; y <- yearP
+  fromMaybe (fail "Date parsing failed")
+          $ return <$> (fromGregorianValid y m d)
+
+-- | Try to convert a ByteString to a date.
+toDate :: B8.ByteString -> Maybe Day
+toDate = maybeParse dateP
+
 -- | Parser for period boundaries.
 periodBoundaryP :: Parser PeriodBoundary
 periodBoundaryP = do
@@ -178,9 +205,22 @@ periodBoundaryP = do
     else fromMaybe (fail "Period boundary parsing failed")
                  $ (return . Just) <$> (fromGregorianValid y m d)
 
-{-
+-- | Try to convert a ByteString to a period boundary.
+toPeriodBoundary :: B8.ByteString -> Maybe PeriodBoundary
+toPeriodBoundary = maybeParse periodBoundaryP
+
+-- | Test if a day is within a period.
+withinPeriod :: Period -> Day -> Bool
+withinPeriod (l,h,o) d = low && high && dow
+  where low = d >= l
+        high = case h of
+                 Just h' -> d <= h'
+                 Nothing -> True
+        dow = let (_, _, n) = toWeekDate d in lookupDow n o
+
+{-------------------------------------------------------------------------------
   Date and time
--}
+-------------------------------------------------------------------------------}
 
 type TimeDuration = DiffTime
 type TimeVariation = DiffTime
@@ -211,9 +251,9 @@ scheduleTimeP = do
   m <- makeTimeOfDayValid <$> decimalP 2 <*> decimalP 2 <*> pure 0
   fromMaybe (fail "Local time parsing failed") $ return . timeOfDayToTime <$> m
 
-{-
+{-------------------------------------------------------------------------------
   Other parsers
--}
+-------------------------------------------------------------------------------}
 
 -- | Parser for flight numbers.
 fnumP :: Parser Int
@@ -224,3 +264,7 @@ pointsIndicatorP :: Parser Int
 pointsIndicatorP = packWith 2 step <?> "Board and off points indicator"
   where step n = (* 26^n) . subtract (ord 'A') . ord <$> P.satisfy letter
         letter c = c >= 'A' && c <= 'Z'
+
+-- | Segment index from leg sequences
+segmentIdx :: Int -> Int -> Int
+segmentIdx board off = off * 26 + board - 1

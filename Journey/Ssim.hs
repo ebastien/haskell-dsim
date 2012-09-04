@@ -2,7 +2,11 @@
 
 module Ssim (
       readSsimFile
-    , ssimOnDs
+    , ssimSegments
+    , Flight(..)
+    , LegPeriod(..)
+    , SegmentPeriod
+    , SegmentDate(..)
     ) where
 
 import qualified Data.ByteString.Lazy as LB
@@ -38,9 +42,7 @@ data Flight = Flight { fAirline :: !AirlineCode
                      } deriving (Show, Eq)
 
 data LegPeriod = LegPeriod { lpFlight :: Flight
-                           , lpBegin :: !PeriodBoundary
-                           , lpEnd :: !PeriodBoundary
-                           , lpDow :: !Dow
+                           , lpPeriod :: !Period
                            , lpSequence :: !Int
                            , lpBoard :: !Port
                            , lpOff :: !Port
@@ -51,12 +53,18 @@ data LegPeriod = LegPeriod { lpFlight :: Flight
 
 type SegmentDEI = Int
 
-data SegmentData = SegmentData { sdFlight :: Flight
-                               , sdIndex :: !Int
-                               , sdBoard :: !Port
-                               , sdOff :: !Port
-                               , sdDEI :: !SegmentDEI
+data SegmentData = SegmentData { dFlight :: Flight
+                               , dIndex :: !Int
+                               , dBoard :: !Port
+                               , dOff :: !Port
+                               , dDEI :: !SegmentDEI
                                } deriving Show
+
+type SegmentPeriod = [(LegPeriod, [SegmentDEI])]
+
+data SegmentDate = MkSegmentDate { sdSegment :: SegmentPeriod
+                                 , sdDate :: Day
+                                 } deriving (Show)
 
 data LegGroup = LegGroup { lgLeg :: LegPeriod
                          , lgSegments :: [SegmentData] } deriving Show
@@ -93,8 +101,8 @@ legPeriodP = do
   iviL <- decimalP 2        <?> "Leg itinerary variation identifier (low)"
   lsn <- decimalP 2         <?> "Leg sequence number"
   void $ P.anyChar
-  bdate <- periodBoundaryP  <?> "Leg period of operation (from)"
-  edate <- periodBoundaryP  <?> "Leg period of operation (to)"
+  bdate <- dateP            <?> "Leg period of operation (begin)"
+  edate <- periodBoundaryP  <?> "Leg period of operation (end)"
   dow <- dowP               <?> "Leg days of week"
   void $ P.anyChar
   bpoint <- portP           <?> "Leg board point"
@@ -115,8 +123,11 @@ legPeriodP = do
   void $ some P.endOfLine
   let variation = iviL + 100 * iviH
       flight = Flight airline fnum suffix variation
-      etime = (atime - atvar + advar) - (dtime - dtvar + ddvar)
-  return $ LegPeriod flight bdate edate dow lsn bpoint opoint dtime atime etime
+      period = (bdate, edate, dow)
+      etime = (atime - atvar) - (dtime - dtvar) + (advar - ddvar)
+  return $ LegPeriod flight period lsn
+                     bpoint opoint
+                     dtime atime etime
 
 -- | Parser for segment records.
 segmentP :: Parser SegmentData
@@ -165,107 +176,6 @@ ssimP :: Parser Ssim
 ssimP = Ssim <$> (headerP            <?> "SSIM7 header")
              <*> (some carrierGroupP <?> "SSIM7 carriers")
 
-{-------------------------------------------------------------------------------
-  Segments browsing
--------------------------------------------------------------------------------}
-
-data POnD = MkPOnD {- #UNPACK# -} !Port
-                   {- #UNPACK# -} !Port
-                   deriving (Show)
-
-instance Enum POnD where
-  fromEnum (MkPOnD a b) = (fromEnum a) * 26^3 + (fromEnum b)
-  toEnum i = let (a,b) = divMod i (26^3) in MkPOnD (toEnum a) (toEnum b)
-
--- | A collection of OnD associations.
-type OnDMap a = M.EnumMap POnD a
-
-type Segment = [(LegPeriod, [SegmentDEI])]
-
-type OnDSegments = OnDMap [Segment]
-
--- | Segment index from board and off legs
-segmentIdx :: LegPeriod -> LegPeriod -> Int
-segmentIdx a b = (lpSequence b) * 26 + (lpSequence a) - 1
-
--- | Extract segments from a flight
-flightSegments :: FlightGroup -> [(POnD, Segment)]
-flightSegments = join . combine
-  where combine []         = []
-        combine xs@(x:xs') = [ mkAssoc y | y <- xs ] : combine xs'
-          where legX = lgLeg x
-                mkAssoc y = (MkPOnD (lpBoard legX) (lpOff legY), map select legs)
-                  where legY = lgLeg y
-                        legs = takeWhile (on (<) (lpSequence . lgLeg) $ y) xs ++ [y]
-                        select l = (legL, map sdDEI . filter ((==) idx . sdIndex) $ lgSegments l)
-                          where legL = lgLeg l
-                                idx = segmentIdx legL legY
-
--- | Extract segments from a SSIM structure.
-ssimSegments :: Ssim -> OnDSegments
-ssimSegments ssim = M.group $ do
-  car <- ssimCarriers ssim
-  flt <- cgFlights car
-  flightSegments flt
-
--- | Compose the matching segment for a path.
-composePath :: OnDSegments -> Path -> [[Segment]]
-composePath onds = walk [id]
-  where walk done (b:[])   = map ($[]) done
-        walk done (a:b:ps) = walk done' (b:ps)
-          where done' = [ d . (c:) | c <- choices, d <- done ]
-                choices = M.find (MkPOnD a b) onds
-
-data SegmentDate = SegmentDate { sFlight :: Flight
-                               , sDate :: !Day
-                               , sBoard :: !Port
-                               , sOff :: !Port
-                               , sDepartureTime :: !ScheduleTime
-                               , sArrivalTime :: !ScheduleTime
-                               , sElapsedTime :: !TimeDuration
-                               } deriving Show
-
--- | Look for a matching date in a period.
-lookupDate :: Segment -> Day -> Maybe SegmentDate
-lookupDate s d = undefined
-
--- | Feasible connections on a given day.
-connections :: Day -> [[Segment]] -> [[SegmentDate]]
-connections d0 = mapMaybe $ connection d0
-
--- | Feasible connection on a given day.
-connection :: Day -> [Segment] -> Maybe [SegmentDate]
-connection d0 xs = case lookupDate (head xs) d0 of
-                     Just s0 -> walk d0 (s0:) xs
-                     Nothing -> Nothing
-  where walk _ trip (_:[])   = Just $ trip []
-        walk d trip (a:b:xs) = case connect d a b of
-                                 Just s  -> walk (sDate s) (trip . (s:)) (b:xs)
-                                 Nothing -> Nothing
-
--- | Connect an inbound segment with an outbound segment
-connect :: Day -> Segment -> Segment -> Maybe SegmentDate
-connect d a b = getFirst . mconcat $ map (First . lookupDate b) days
-  where days = takeWhile shortEnough $ dropWhile tooShort [d..]
-        shortEnough d' = wait d' < secondsToDiffTime 6*60*60
-        tooShort d' = wait d' < secondsToDiffTime 30*60
-        wait d' = depB - arrA + secondsToDiffTime (diffDays d d' * 86400)
-        arrA = lpArrivalTime . fst $ last a
-        depB = lpDepartureTime . fst $ head b
-
--- | Extract OnDs from a flight.
-flightOnDs :: FlightGroup -> [OnD]
-flightOnDs = join . combine . map lgLeg
-  where combine xs@(x:xs') = [ (lpBoard x, lpOff y) | y <- xs ] : combine xs'
-        combine []        = []
-
--- | Extract unique OnDs from a SSIM structure.
-ssimOnDs :: Ssim -> [OnD]
-ssimOnDs ssim = map head . group . sort $ do
-  car <- ssimCarriers ssim
-  flt <- cgFlights car
-  flightOnDs flt
-
 -- | Run the SSIM parser on the given file.
 readSsimFile :: String -> IO Ssim
 readSsimFile s = do
@@ -273,3 +183,24 @@ readSsimFile s = do
   case result of
     LP.Fail rem ctx msg -> fail . unlines $ msg:(show $ LB.length rem):ctx
     LP.Done _ ssim      -> return ssim
+
+-- | Extract segments from a flight
+flightSegments :: FlightGroup -> [(OnD, SegmentPeriod)]
+flightSegments = join . combine
+  where combine []         = []
+        combine xs@(x:xs') = [ mkAssoc y | y <- xs ] : combine xs'
+          where legX = lgLeg x
+                mkAssoc y = ((lpBoard legX, lpOff legY), map select legs)
+                  where legY = lgLeg y
+                        legs = takeWhile (on (<) (lpSequence . lgLeg) $ y) xs ++ [y]
+                        select l = (legL, map dDEI . filter ((==) idx . dIndex) $ segL)
+                          where segL = lgSegments l
+                                legL = lgLeg l
+                                idx = segmentIdx (lpSequence legL) (lpSequence legY)
+
+-- | Extract segments from a SSIM structure.
+ssimSegments :: Ssim -> [(OnD, SegmentPeriod)]
+ssimSegments ssim = do
+  car <- ssimCarriers ssim
+  flt <- cgFlights car
+  flightSegments flt
