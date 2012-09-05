@@ -5,12 +5,14 @@ module Main (main) where
 import Data.Functor ((<$>))
 import Text.Printf (printf)
 import System.Environment (getArgs)
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, mapMaybe)
 import Types (toPort, toDate)
 import Data.ByteString.Char8 (pack)
 import Data.List (intercalate, nub)
 import Data.Time.LocalTime (TimeOfDay(..), timeToTimeOfDay)
 import Data.Time.Calendar (Day, toGregorian)
+import Control.Monad (forM_, forM)
+import Data.Monoid (mconcat)
 
 import Types (
     OnD
@@ -44,38 +46,39 @@ import Connection (
   , OnDSegments
   )
 
-printAll :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> IO ()
-printAll date segs covs = mapM_ (printOnD date segs covs) onds
+fmtAll :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> ShowS
+fmtAll date segs covs = foldr (.) id $ map (fmtOnD date segs covs) onds
   where onds = nub $ concatMap coveredOnDs covs
 
-printOnD :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> OnD ->  IO ()
-printOnD date segs covs ond = mapM_ loop covs
-  where loop cov = case ondPaths ond cov of
-                     Just ps -> mapM_ (printPath date segs) ps
-                     Nothing -> return ()
+fmtOnD :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> OnD -> ShowS
+fmtOnD date segs covs ond = foldr (.) id $ map format covs
+  where format cov = case ondPaths ond cov of
+                       Just paths -> foldr (.) id $ map (fmtPath date segs) paths
+                       Nothing    -> id
 
-printPath :: Day -> OnDSegments -> Path -> IO ()
-printPath date segs path = mapM_ printCnx $ connections date segs path
+fmtPath :: Day -> OnDSegments -> Path -> ShowS
+fmtPath date segs path = foldr (.) id $ map fmtCnx (connections date segs path)
 
-printCnx :: [SegmentDate] -> IO ()
-printCnx cnx = putStrLn . intercalate ";" . map fmtSeg $ cnx
-  where fmtSeg s = printf "%s %s %s %s %s %s"
-                     (fmtFlight f) (show $ lpBoard l) (show $ lpOff l)
-                     (fmtDate $ sdDate s)
-                     (fmtTime $ lpDepartureTime l)
-                     (fmtTime $ lpArrivalTime l) :: String
-          where l = fst . head $ sdSegment s
-                f = lpFlight l
+fmtCnx :: [SegmentDate] -> ShowS
+fmtCnx cnx = foldr (.) id $ map fmtSeg cnx
 
-fmtFlight :: Flight -> String
-fmtFlight f = printf "%s%4d" (show $ fAirline f) (fNumber f) :: String
+fmtSeg :: SegmentDate -> ShowS
+fmtSeg s = foldr (.) id $ [ fmtFlight f, shows $ lpBoard l, shows $ lpOff l,
+                            fmtDate $ sdDate s,
+                            fmtTime $ lpDepartureTime l,
+                            fmtTime $ lpArrivalTime l ]
+  where l = fst . head $ sdSegment s
+        f = lpFlight l
 
-fmtDate :: Day -> String
-fmtDate date = printf "%04d%02d%02d" y m d :: String
+fmtFlight :: Flight -> ShowS
+fmtFlight f = (++) $ printf "%s%4d" (show $ fAirline f) (fNumber f)
+
+fmtDate :: Day -> ShowS
+fmtDate date = (++) $ printf "%04d%02d%02d" y m d
   where (y,m,d) = toGregorian date
 
-fmtTime :: ScheduleTime -> String
-fmtTime t = printf "%02d:%02d" h m :: String
+fmtTime :: ScheduleTime -> ShowS
+fmtTime t = (++) $ printf "%02d:%02d" h m
   where TimeOfDay h m _ = timeToTimeOfDay t
 
 -- | 
@@ -100,7 +103,7 @@ main = do
 
   -- mapM_ (print . ondPaths ond) covs
 
-  printAll date segments covs
+  putStr $ fmtAll date segments covs ""
   
   -- printOnD date segments covs ond
 
