@@ -137,7 +137,7 @@ coveredOnDs cov = [ (org, dst) | (org, alts) <- M.toList cov, dst <- M.keys alts
 
 -- | List of paths for an origin and a destination.
 ondPaths :: (MetricSpace e) => OnD -> PortCoverages e -> Maybe [Path]
-ondPaths (a,b) cov = case M.lookup b . M.find a $ cov of
+ondPaths (a,b) cov = case M.lookup a cov >>= M.lookup b of
                        Just itis -> Just $ [ a : path ++ [b]
                                            | Itinerary _ path _ <- itis ]
                        Nothing   -> Nothing
