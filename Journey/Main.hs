@@ -11,8 +11,6 @@ import Data.ByteString.Char8 (pack)
 import Data.List (intercalate, nub)
 import Data.Time.LocalTime (TimeOfDay(..), timeToTimeOfDay)
 import Data.Time.Calendar (Day, toGregorian)
-import Control.Monad (forM_, forM)
-import Data.Monoid (mconcat)
 
 import Types (
     OnD
@@ -46,39 +44,39 @@ import Connection (
   , OnDSegments
   )
 
-fmtAll :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> ShowS
-fmtAll date segs covs = foldr (.) id $ map (fmtOnD date segs covs) onds
+showAll :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> ShowS
+showAll date segs covs = foldr (.) id $ map (showOnD date segs covs) onds
   where onds = nub $ concatMap coveredOnDs covs
 
-fmtOnD :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> OnD -> ShowS
-fmtOnD date segs covs ond = foldr (.) id $ map format covs
+showOnD :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> OnD -> ShowS
+showOnD date segs covs ond = foldr (.) id $ map format covs
   where format cov = case ondPaths ond cov of
-                       Just paths -> foldr (.) id $ map (fmtPath date segs) paths
+                       Just paths -> foldr (.) id $ map (showPath date segs) paths
                        Nothing    -> id
 
-fmtPath :: Day -> OnDSegments -> Path -> ShowS
-fmtPath date segs path = foldr (.) id $ map fmtCnx (connections date segs path)
+showPath :: Day -> OnDSegments -> Path -> ShowS
+showPath date segs path = foldr (.) id $ map showCnx (connections date segs path)
 
-fmtCnx :: [SegmentDate] -> ShowS
-fmtCnx cnx = foldr (.) id $ map fmtSeg cnx
+showCnx :: [SegmentDate] -> ShowS
+showCnx cnx = foldr (.) id $ map showSeg cnx
 
-fmtSeg :: SegmentDate -> ShowS
-fmtSeg s = foldr (.) id $ [ fmtFlight f, shows $ lpBoard l, shows $ lpOff l,
-                            fmtDate $ sdDate s,
-                            fmtTime $ lpDepartureTime l,
-                            fmtTime $ lpArrivalTime l ]
+showSeg :: SegmentDate -> ShowS
+showSeg s = foldr (.) id $ [ showFlight f, shows $ lpBoard l, shows $ lpOff l,
+                             showDate $ sdDate s,
+                             showTime $ lpDepartureTime l,
+                             showTime $ lpArrivalTime l ]
   where l = fst . head $ sdSegment s
         f = lpFlight l
 
-fmtFlight :: Flight -> ShowS
-fmtFlight f = (++) $ printf "%s%4d" (show $ fAirline f) (fNumber f)
+showFlight :: Flight -> ShowS
+showFlight f = (++) $ printf "%s%4d" (show $ fAirline f) (fNumber f)
 
-fmtDate :: Day -> ShowS
-fmtDate date = (++) $ printf "%04d%02d%02d" y m d
+showDate :: Day -> ShowS
+showDate date = (++) $ printf "%04d%02d%02d" y m d
   where (y,m,d) = toGregorian date
 
-fmtTime :: ScheduleTime -> ShowS
-fmtTime t = (++) $ printf "%02d:%02d" h m
+showTime :: ScheduleTime -> ShowS
+showTime t = (++) $ printf "%02d:%02d" h m
   where TimeOfDay h m _ = timeToTimeOfDay t
 
 -- | 
@@ -103,7 +101,7 @@ main = do
 
   -- mapM_ (print . ondPaths ond) covs
 
-  putStr $ fmtAll date segments covs ""
+  putStr $ showAll date segments covs ""
   
   -- printOnD date segments covs ond
 
