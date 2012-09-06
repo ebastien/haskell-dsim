@@ -49,14 +49,21 @@ import Data.Monoid (mconcat, mempty, mappend)
 import Data.Foldable (foldMap)
 import qualified Data.Text.Lazy.IO as T
 import Data.Text.Lazy.Builder (Builder, fromString, toLazyText, singleton)
-import Data.Text.Format (build, left)
+import Data.Text.Format (build, left, Shown(..))
 
-buildAll :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> Builder
-buildAll date segs covs = foldMap (buildForOnD date segs covs) onds
+buildAll :: (MetricSpace e) => OnDSegments
+                            -> [PortCoverages e]
+                            -> Day
+                            -> Builder
+buildAll segs covs date = foldMap (buildForOnD segs covs date) onds
   where onds = nub $ concatMap coveredOnDs covs
 
-buildForOnD :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> OnD -> Builder
-buildForOnD date segs covs ond = foldMap build covs
+buildForOnD :: (MetricSpace e) => OnDSegments
+                               -> [PortCoverages e]
+                               -> Day
+                               -> OnD
+                               -> Builder
+buildForOnD segs covs date ond = foldMap build covs
   where build cov = case ondPaths ond cov of
                       Just paths -> foldMap (buildForPath date segs ond) paths
                       Nothing    -> mempty
@@ -68,10 +75,7 @@ buildForPath date segs ond = foldMap build . connections date segs
         prefix = buildOnD ond `mappend` singleton ','
 
 buildOnD :: OnD -> Builder
-buildOnD (org,dst) = foldMap buildPort [org, dst]
-
-buildPort :: Port -> Builder
-buildPort = fromString . show
+buildOnD (org,dst) = build "{}-{}" (Shown org, Shown dst)
 
 buildCnx :: [SegmentDate] -> Builder
 buildCnx = mconcat . intersperse (singleton ';') . map buildSeg
@@ -88,8 +92,8 @@ buildSeg s = mconcat . intersperse (singleton ' ') $ [ buildFlight f
         f = lpFlight l
 
 buildFlight :: Flight -> Builder
-buildFlight f = mconcat [fromString . show $ fAirline f, left 5 ' ' $ fNumber f]
-  
+buildFlight f = build "{} {}" (Shown $ fAirline f, left 5 ' ' $ fNumber f)
+
 buildDate :: Day -> Builder
 buildDate date = mconcat [pad 4 y, pad 2 m, pad 2 d]
   where (y,m,d) = toGregorian date
@@ -103,11 +107,12 @@ buildTime t = build "{}:{}" [pad h, pad m]
 -- | 
 main :: IO ()
 main = do
-  [refsFile, ssimFile, day] <- getArgs
+  [refsFile, ssimFile, beginDate, endDate] <- getArgs
   refs <- loadReferences refsFile
   segments <- fromSegments . assocToCities refs . ssimSegments <$> readSsimFile ssimFile
 
   let covs = take 3 . coverages . adjacency refs $ toOnDs segments
-      date = fromJust . toDate $ pack day
+      dateL = fromJust . toDate $ pack beginDate
+      dateH = fromJust . toDate $ pack endDate
 
-  T.putStr . toLazyText $ buildAll date segments covs
+  T.putStr . toLazyText $ foldMap (buildAll segments covs) [dateL..dateH]
