@@ -3,19 +3,20 @@
 module Main (main) where
 
 import Data.Functor ((<$>))
-import Text.Printf (printf)
 import System.Environment (getArgs)
-import Data.Maybe (fromJust, mapMaybe)
-import Types (toPort, toDate)
+import Data.Maybe (fromJust)
 import Data.ByteString.Char8 (pack)
-import Data.List (intercalate, nub)
+import Data.List (nub, intersperse)
 import Data.Time.LocalTime (TimeOfDay(..), timeToTimeOfDay)
 import Data.Time.Calendar (Day, toGregorian)
 
 import Types (
-    OnD
+    Port
+  , OnD
   , Path
   , ScheduleTime
+  , toPort
+  , toDate
   )
 import Ssim (
     readSsimFile
@@ -44,64 +45,69 @@ import Connection (
   , OnDSegments
   )
 
-showAll :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> ShowS
-showAll date segs covs = foldr (.) id $ map (showOnD date segs covs) onds
+import Data.Monoid (mconcat, mempty, mappend)
+import Data.Foldable (foldMap)
+import qualified Data.Text.Lazy.IO as T
+import Data.Text.Lazy.Builder (Builder, fromString, toLazyText, singleton)
+import Data.Text.Format (build, left)
+
+buildAll :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> Builder
+buildAll date segs covs = foldMap (buildForOnD date segs covs) onds
   where onds = nub $ concatMap coveredOnDs covs
 
-showOnD :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> OnD -> ShowS
-showOnD date segs covs ond = foldr (.) id $ map format covs
-  where format cov = case ondPaths ond cov of
-                       Just paths -> foldr (.) id $ map (showPath date segs) paths
-                       Nothing    -> id
+buildForOnD :: (MetricSpace e) => Day -> OnDSegments -> [PortCoverages e] -> OnD -> Builder
+buildForOnD date segs covs ond = foldMap build covs
+  where build cov = case ondPaths ond cov of
+                      Just paths -> foldMap (buildForPath date segs ond) paths
+                      Nothing    -> mempty
 
-showPath :: Day -> OnDSegments -> Path -> ShowS
-showPath date segs path = foldr (.) id $ map showCnx (connections date segs path)
+buildForPath :: Day -> OnDSegments -> OnD -> Path -> Builder
+buildForPath date segs ond = foldMap build . connections date segs
+  where build c = mconcat [prefix, buildCnx c, eol]
+        eol = singleton '\n'
+        prefix = buildOnD ond `mappend` singleton ','
 
-showCnx :: [SegmentDate] -> ShowS
-showCnx cnx = foldr (.) id $ map showSeg cnx
+buildOnD :: OnD -> Builder
+buildOnD (org,dst) = foldMap buildPort [org, dst]
 
-showSeg :: SegmentDate -> ShowS
-showSeg s = foldr (.) id $ [ showFlight f, shows $ lpBoard l, shows $ lpOff l,
-                             showDate $ sdDate s,
-                             showTime $ lpDepartureTime l,
-                             showTime $ lpArrivalTime l ]
+buildPort :: Port -> Builder
+buildPort = fromString . show
+
+buildCnx :: [SegmentDate] -> Builder
+buildCnx = mconcat . intersperse (singleton ';') . map buildSeg
+
+buildSeg :: SegmentDate -> Builder
+buildSeg s = mconcat . intersperse (singleton ' ') $ [ buildFlight f
+                                                     , fromString . show $ lpBoard l
+                                                     , fromString . show $ lpOff l
+                                                     , buildDate $ sdDate s
+                                                     , buildTime $ lpDepartureTime l
+                                                     , buildTime $ lpArrivalTime l
+                                                     ]
   where l = fst . head $ sdSegment s
         f = lpFlight l
 
-showFlight :: Flight -> ShowS
-showFlight f = (++) $ printf "%s%4d" (show $ fAirline f) (fNumber f)
-
-showDate :: Day -> ShowS
-showDate date = (++) $ printf "%04d%02d%02d" y m d
+buildFlight :: Flight -> Builder
+buildFlight f = mconcat [fromString . show $ fAirline f, left 5 ' ' $ fNumber f]
+  
+buildDate :: Day -> Builder
+buildDate date = mconcat [pad 4 y, pad 2 m, pad 2 d]
   where (y,m,d) = toGregorian date
+        pad n = left n '0'
 
-showTime :: ScheduleTime -> ShowS
-showTime t = (++) $ printf "%02d:%02d" h m
+buildTime :: ScheduleTime -> Builder
+buildTime t = build "{}:{}" [pad h, pad m]
   where TimeOfDay h m _ = timeToTimeOfDay t
+        pad = left 2 '0'
 
 -- | 
 main :: IO ()
 main = do
-  [refsFile, ssimFile, org, dst, day] <- getArgs
-  
+  [refsFile, ssimFile, day] <- getArgs
   refs <- loadReferences refsFile
-  
   segments <- fromSegments . assocToCities refs . ssimSegments <$> readSsimFile ssimFile
-  let onds = toOnDs segments
-  
-  -- printf "%d OnDs loaded from SSIM file\n" $ length onds :: IO ()
-  
-  let adj = adjacency refs onds
-      covs = take 3 $ coverages adj
-  
-  -- mapM_ (printf "%d paths found\n" . length . coveragePaths) covs
-  
-  let ond = (fromJust . toPort $ pack org, fromJust . toPort $ pack dst)
+
+  let covs = take 3 . coverages . adjacency refs $ toOnDs segments
       date = fromJust . toDate $ pack day
 
-  -- mapM_ (print . ondPaths ond) covs
-
-  putStr $ showAll date segments covs ""
-  
-  -- printOnD date segments covs ond
-
+  T.putStr . toLazyText $ buildAll date segments covs
