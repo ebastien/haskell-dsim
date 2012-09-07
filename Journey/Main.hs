@@ -6,7 +6,7 @@ import Data.Functor ((<$>))
 import System.Environment (getArgs)
 import Data.Maybe (fromJust)
 import Data.ByteString.Char8 (pack)
-import Data.List (nub, intersperse)
+import Data.List (sort, group, intersperse)
 import Data.Time.LocalTime (TimeOfDay(..), timeToTimeOfDay)
 import Data.Time.Calendar (Day, toGregorian)
 
@@ -56,7 +56,7 @@ buildAll :: (MetricSpace e) => OnDSegments
                             -> Day
                             -> Builder
 buildAll segs covs date = foldMap (buildForOnD segs covs date) onds
-  where onds = nub $ concatMap coveredOnDs covs
+  where onds = map head . group . sort $ concatMap coveredOnDs covs
 
 buildForOnD :: (MetricSpace e) => OnDSegments
                                -> [PortCoverages e]
