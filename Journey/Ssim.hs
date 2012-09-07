@@ -49,6 +49,7 @@ data LegPeriod = LegPeriod { lpFlight :: Flight
                            , lpDepartureTime :: !ScheduleTime
                            , lpArrivalTime :: !ScheduleTime
                            , lpElapsedTime :: !TimeDuration
+                           , lpArrivalDateVariation :: !Int
                            } deriving Show
 
 type SegmentDEI = Int
@@ -63,7 +64,10 @@ data SegmentData = SegmentData { dFlight :: Flight
 type SegmentPeriod = [(LegPeriod, [SegmentDEI])]
 
 data SegmentDate = MkSegmentDate { sdSegment :: SegmentPeriod
-                                 , sdDate :: Day
+                                 , sdDepartureDate :: Day
+                                 , sdDepartureTime :: ScheduleTime
+                                 , sdArrivalDate :: Day
+                                 , sdArrivalTime :: ScheduleTime
                                  } deriving (Show)
 
 data LegGroup = LegGroup { lgLeg :: LegPeriod
@@ -124,10 +128,11 @@ legPeriodP = do
   let variation = iviL + 100 * iviH
       flight = Flight airline fnum suffix variation
       period = (bdate, edate, dow)
-      etime = (atime - atvar) - (dtime - dtvar) + (advar - ddvar)
+      etime = (atime - atvar) - (dtime - dtvar)
+            + (secondsToDiffTime . fromIntegral $ (advar - ddvar) * 86400)
   return $ LegPeriod flight period lsn
                      bpoint opoint
-                     dtime atime etime
+                     dtime atime etime advar
 
 -- | Parser for segment records.
 segmentP :: Parser SegmentData
@@ -192,7 +197,7 @@ flightSegments = join . combine
           where legX = lgLeg x
                 mkAssoc y = ((lpBoard legX, lpOff legY), map select legs)
                   where legY = lgLeg y
-                        legs = takeWhile (on (<) (lpSequence . lgLeg) $ y) xs ++ [y]
+                        legs = takeWhile (on (>=) (lpSequence . lgLeg) $ y) xs
                         select l = (legL, map dDEI . filter ((==) idx . dIndex) $ segL)
                           where segL = lgSegments l
                                 legL = lgLeg l

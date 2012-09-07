@@ -69,24 +69,32 @@ buildForOnD segs covs date ond = foldMap build covs
                       Nothing    -> mempty
 
 buildForPath :: Day -> OnDSegments -> OnD -> Path -> Builder
-buildForPath date segs ond = foldMap build . connections date segs
-  where build c = mconcat [prefix, buildCnx c, eol]
-        eol = singleton '\n'
-        prefix = buildOnD ond `mappend` singleton ','
+buildForPath date segs ond path = foldMap build $ connections segs date path
+  where build c = mconcat [ buildOnD ond   , singleton '\t'
+                          , buildPath path , singleton '\t'
+                          , buildCnx c
+                          , singleton '\n']
 
 buildOnD :: OnD -> Builder
-buildOnD (org,dst) = build "{}-{}" (Shown org, Shown dst)
+buildOnD (org,dst) = buildPath [org,dst]
+
+buildPath :: Path -> Builder
+buildPath = mconcat . intersperse (singleton '-') . map buildPort
+
+buildPort :: Port -> Builder
+buildPort = fromString . show
 
 buildCnx :: [SegmentDate] -> Builder
 buildCnx = mconcat . intersperse (singleton ';') . map buildSeg
 
 buildSeg :: SegmentDate -> Builder
 buildSeg s = mconcat . intersperse (singleton ' ') $ [ buildFlight f
-                                                     , fromString . show $ lpBoard l
-                                                     , fromString . show $ lpOff l
-                                                     , buildDate $ sdDate s
-                                                     , buildTime $ lpDepartureTime l
-                                                     , buildTime $ lpArrivalTime l
+                                                     , buildPort $ lpBoard l
+                                                     , buildPort $ lpOff l
+                                                     , buildDate $ sdDepartureDate s
+                                                     , buildTime $ sdDepartureTime s
+                                                     , buildDate $ sdArrivalDate s
+                                                     , buildTime $ sdArrivalTime s
                                                      ]
   where l = fst . head $ sdSegment s
         f = lpFlight l
@@ -114,5 +122,9 @@ main = do
   let covs = take 3 . coverages . adjacency refs $ toOnDs segments
       dateL = fromJust . toDate $ pack beginDate
       dateH = fromJust . toDate $ pack endDate
+
+  -- let (a,b) = join (***) (fromJust . toPort) ("NYC", "STL")
+  -- mapM_ (putStrLn . show) $ M.find (MkPOnD a b) segments
+  -- T.putStr . toLazyText . buildForOnD segments covs dateL $ join (***) (fromJust . toPort) ("LON", "DFW")
 
   T.putStr . toLazyText $ foldMap (buildAll segments covs) [dateL..dateH]

@@ -23,7 +23,6 @@ module Types (
     , TimeDuration
     , TimeVariation
     , timeVariationP
-    , DateVariation
     , dateVariationP
     , ScheduleTime
     , scheduleTimeP
@@ -224,7 +223,6 @@ withinPeriod (l,h,o) d = low && high && dow
 
 type TimeDuration = DiffTime
 type TimeVariation = DiffTime
-type DateVariation = DiffTime
 type ScheduleTime = DiffTime
 
 -- | Parser for time variations.
@@ -239,9 +237,8 @@ timeVariationP = (plus <|> minus) <*> time
             else fail "Time variation parsing failed"
 
 -- | Parser for date variations.
-dateVariationP :: Parser DateVariation
-dateVariationP = secondsToDiffTime . (*86400) . fromIntegral
-                 <$> (before <|> after)
+dateVariationP :: Parser Int
+dateVariationP = fromIntegral <$> (before <|> after)
   where before = pure (-1) <* P.char 'J'
         after  = subtract (ord '0') . ord <$> P.digit
 

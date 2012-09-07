@@ -7,8 +7,9 @@ module Connection (
 
 import Data.Maybe (mapMaybe)
 import Data.Monoid (mconcat, First(..), getFirst)
+import Control.Monad (mzero)
 
-import Data.Time.Calendar (Day, diffDays)
+import Data.Time.Calendar (Day, addDays, diffDays)
 import Data.Time.Clock (secondsToDiffTime)
 
 import qualified EnumMap as M
@@ -48,36 +49,48 @@ toOnDs = map unpackOnd . M.keys
 
 -- | Look for a matching date in a period.
 lookupDate :: SegmentPeriod -> Day -> Maybe SegmentDate
-lookupDate s@(l:_) d = if withinPeriod (lpPeriod $ fst l) d
-                         then Just $ MkSegmentDate s d
-                         else Nothing
+lookupDate s@(l:_) depDate = if withinPeriod (lpPeriod $ fst l) depDate
+                               then Just $ MkSegmentDate s depDate depTime arrDate arrTime
+                               else Nothing
+  where depTime = lpDepartureTime . fst $ l
+        arrDate = addDays (fromIntegral $ lpArrivalDateVariation lastLeg) depDate
+        arrTime = lpArrivalTime lastLeg
+        lastLeg = fst $ last s
+
+-- | Convert a path into a list of OnDs.
+toSteps :: Path -> [OnD]
+toSteps path = zip path $ tail path
 
 -- | Feasible connections on a given day.
-connections :: Day -> OnDSegments -> Path -> [[SegmentDate]]
-connections d0 onds = mapMaybe (connectAll d0) . walk [id]
-  where walk done (b:[])   = map ($[]) done
-        walk done (a:b:ps) = walk done' (b:ps)
-          where done' = [ d . (c:) | c <- choices, d <- done ]
-                choices = M.find (MkPOnD a b) onds
+connections :: OnDSegments -> Day -> Path -> [[SegmentDate]]
+connections onds d0 = map (($[]) . fst) . foldl combine init . toSteps
+  where init = [(id, ( d0                         -- departure date
+                     , secondsToDiffTime 0        -- departure time
+                     , secondsToDiffTime 0        -- minimum connecting time
+                     , secondsToDiffTime 24*60*60 -- maximum connecting time
+               ))]
+        combine parts (a, b) = do
+            (done, (arrDate, arrTime, cmin, cmax)) <- parts
+            s <- M.find (MkPOnD a b) onds
+            case connect arrDate arrTime cmin cmax s of
+              Nothing -> mzero
+              Just o  -> let cmin' = secondsToDiffTime 30*60
+                             cmax' = secondsToDiffTime 6*60*60
+                             limits = ( sdArrivalDate o
+                                      , sdArrivalTime o
+                                      , cmin', cmax') in
+                         return $ (done . (o:), limits)
 
--- | Connect all segments of a journey.
-connectAll :: Day -> [SegmentPeriod] -> Maybe [SegmentDate]
--- connectAll d0 xs | trace (printf "connectAll %s %s" (show d0) (show xs)) False = undefined
-connectAll d0 xs = case lookupDate (head xs) d0 of
-                     Just s0 -> walk d0 (s0:) xs
-                     Nothing -> Nothing
-  where walk _ trip (_:[])   = Just $ trip []
-        walk d trip (a:b:xs) = case connect d a b of
-                                 Just s  -> walk (sdDate s) (trip . (s:)) (b:xs)
-                                 Nothing -> Nothing
-
--- | Connect an inbound segment with an outbound segment
-connect :: Day -> SegmentPeriod -> SegmentPeriod -> Maybe SegmentDate
--- connect d a b | trace (printf "connect %s %s %s" (show d) (show a) (show b)) False = undefined
-connect d a b = getFirst . mconcat $ map (First . lookupDate b) days
-  where days = takeWhile shortEnough $ dropWhile tooShort [d..]
-        shortEnough d' = wait d' < secondsToDiffTime 6*60*60
-        tooShort d' = wait d' < secondsToDiffTime 30*60
-        wait d' = depB - arrA + secondsToDiffTime (diffDays d' d * 86400)
-        arrA = lpArrivalTime . fst $ last a
-        depB = lpDepartureTime . fst $ head b
+-- | Connect an outbound segment with given time constraints.
+connect :: Day
+        -> ScheduleTime
+        -> TimeDuration
+        -> TimeDuration
+        -> SegmentPeriod
+        -> Maybe SegmentDate
+connect d0 t0 cmin cmax s = getFirst . mconcat $ map (First . lookupDate s) depDates
+  where depDates = takeWhile shortEnough $ dropWhile tooShort [d0..]
+        shortEnough d = wait d < cmax
+        tooShort d = wait d < cmin
+        wait d = t1 - t0 + secondsToDiffTime (diffDays d d0 * 86400)
+        t1 = lpDepartureTime . fst $ head s
