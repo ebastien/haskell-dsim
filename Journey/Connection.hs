@@ -5,20 +5,15 @@ module Connection (
     , OnDSegments
     ) where
 
-import Data.Maybe (mapMaybe)
 import Data.Monoid (mconcat, First(..), getFirst)
 import Control.Monad (mzero)
-
 import Data.Time.Calendar (Day, addDays, diffDays)
 import Data.Time.Clock (secondsToDiffTime)
 
 import qualified EnumMap as M
 
-import Types
-import Ssim
-
-import Text.Printf (printf)
-import Debug.Trace (trace)
+import Types ( Port, SegmentPeriod, OnD, SegmentDate(..), Path
+             , ScheduleTime, TimeDuration, LegPeriod(..), withinPeriod )
 
 {-------------------------------------------------------------------------------
   Connection building
@@ -28,8 +23,8 @@ import Debug.Trace (trace)
 data POnD = MkPOnD !Port !Port deriving (Show)
 
 instance Enum POnD where
-  fromEnum (MkPOnD a b) = (fromEnum a) * 26^3 + (fromEnum b)
-  toEnum i = let (a,b) = divMod i (26^3) in MkPOnD (toEnum a) (toEnum b)
+  fromEnum (MkPOnD a b) = (fromEnum a) * (26^(3::Int)) + (fromEnum b)
+  toEnum i = let (a,b) = divMod i (26^(3::Int)) in MkPOnD (toEnum a) (toEnum b)
 
 -- | A collection of OnD associations.
 type OnDMap a = M.EnumMap POnD a
@@ -49,6 +44,7 @@ toOnDs = map unpackOnd . M.keys
 
 -- | Look for a matching date in a period.
 lookupDate :: SegmentPeriod -> Day -> Maybe SegmentDate
+lookupDate [] _ = error "lookupDate on empty segment"
 lookupDate s@(l:_) depDate = if withinPeriod (lpPeriod $ fst l) depDate
                                then Just $ MkSegmentDate s depDate depTime arrDate arrTime
                                else Nothing
@@ -63,12 +59,12 @@ toSteps path = zip path $ tail path
 
 -- | Feasible connections on a given day.
 connections :: OnDSegments -> Day -> Path -> [[SegmentDate]]
-connections onds d0 = map (($[]) . fst) . foldl combine init . toSteps
-  where init = [(id, ( d0                         -- departure date
-                     , secondsToDiffTime 0        -- departure time
-                     , secondsToDiffTime 0        -- minimum connecting time
-                     , secondsToDiffTime 24*60*60 -- maximum connecting time
-               ))]
+connections onds d0 = map (($[]) . fst) . foldl combine s0 . toSteps
+  where s0 = [(id, ( d0                         -- departure date
+                   , secondsToDiffTime 0        -- departure time
+                   , secondsToDiffTime 0        -- minimum connecting time
+                   , secondsToDiffTime 24*60*60 -- maximum connecting time
+             ))]
         combine parts (a, b) = do
             (done, (arrDate, arrTime, cmin, cmax)) <- parts
             s <- M.find (MkPOnD a b) onds

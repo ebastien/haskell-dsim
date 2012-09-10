@@ -12,20 +12,11 @@ module Journey (
     , ondPaths
     ) where
     
-import Control.Monad (guard, join, foldM, mzero)
-import Data.Maybe (fromJust, isJust, mapMaybe)
-import Control.Arrow ((***))
-import Data.List (groupBy, sortBy, sort, group)
-import Data.Function (on)
-import Data.Traversable (traverse)
-
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Vector as V
+import Control.Monad (foldM, mzero)
+import Data.Maybe (mapMaybe)
 import qualified EnumMap as M
 
-import Types
+import Types (Port, Path, OnD)
 
 -- | A sorted collection of port associations.
 type PortMap a = M.EnumMap Port a
@@ -85,6 +76,7 @@ competitiveDistance elemA distAB steps = fmap fst $ foldM detour (distAB, distAB
 extendedCoverage :: (MetricSpace e) => PortAdjacencies e
                                     -> [PortCoverages e]
                                     -> [PortCoverages e]
+extendedCoverage _ [] = error "extendedCoverage on empty coverages list"
 extendedCoverage adj covs@(cov:_) = flip (:) covs $ groupOrg $ do
     (portB, alts, adjs) <- zjoin (M.toList cov) (M.toList adj)
     Edge portA elemA elemB distAB <- adjs
