@@ -11,7 +11,7 @@ import Data.Text.Lazy.Builder (toLazyText)
 import System.Environment (getArgs)
 
 import Ssim (readSsimFile, ssimSegments, toDate)
-import Journey (coverages)
+import Route (coverages)
 import GeoCoord (loadReferences, assocToCities, adjacency)
 import Connection (fromSegments, toOnDs)
 import Builder (buildAll)

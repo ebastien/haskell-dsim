@@ -14,7 +14,7 @@ import Data.Time.Calendar (Day, toGregorian)
 
 import Types ( Port, OnD, Path, ScheduleTime
              , Flight(..), LegPeriod(..), SegmentDate(..) )
-import Journey ( coveredOnDs, ondPaths, MetricSpace, PortCoverages )
+import Route ( coveredOnDs, ondPaths, MetricSpace, PortCoverages )
 import Connection ( connections, OnDSegments )
 
 -- | Build a representation of all itineraries departing on a given day.

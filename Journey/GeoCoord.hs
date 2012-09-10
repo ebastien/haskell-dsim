@@ -15,7 +15,7 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Vector as V
 import qualified EnumMap as M
 
-import Journey ( MetricSpace(..), PortAdjacencies
+import Route ( MetricSpace(..), PortAdjacencies
                , Edge(..), Distance, PortMap )
 import Types (Port, OnD)
 import Ssim (toPort)

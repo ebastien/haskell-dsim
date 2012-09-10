@@ -1,4 +1,4 @@
-module Journey (
+module Route (
       PortMap
     , Distance
     , MetricSpace
